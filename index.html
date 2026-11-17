@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#e2b9ac">
+<title>Рисование на песке</title>
+<style>
+:root {
+  /* Один визуальный мир: весь экран занят песком, интерфейс лежит тихими метками вдоль нижнего края. */
+  --sand: #e2b9ac;                      /* фон до первого кадра */
+  --ink: rgba(74, 44, 40, .80);         /* знаки и подписи поверх песка */
+  --ink-soft: rgba(74, 44, 40, .34);
+  --halo: rgba(255, 244, 236, .55);     /* ореол под текстом, чтобы зерно не съедало буквы */
+  --glass: rgba(255, 250, 246, .16);    /* подложка кнопок */
+  --glass-on: rgba(255, 252, 248, .62);
+  --glass-edge: rgba(255, 255, 255, .30);
+  --panel: rgba(255, 249, 244, .86);     /* меню инструментов */
+  --ring: rgba(58, 32, 28, .92);         /* кольцо курсора */
+  --ring-halo: rgba(255, 255, 255, .78);
+  --font-ui: "Avenir Next", "Segoe UI Variable Text", "Segoe UI", "Helvetica Neue", Roboto, "Noto Sans", sans-serif;
+  color-scheme: light;
+}
+html, body {
+  height: 100%; margin: 0; overflow: hidden; background: var(--sand);
+  overscroll-behavior: none; touch-action: none;
+  -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+body { position: fixed; inset: 0; font-family: var(--font-ui); color: var(--ink); }
+#sand { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; }
+
+.ui { transition: opacity .6s ease; }
+body.drawing .ui { opacity: .1; }
+body.drawing #dock > * { pointer-events: none; }
+
+#dock {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 0 calc(12px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) calc(10px + env(safe-area-inset-left));
+  pointer-events: none;
+}
+#dock > * { pointer-events: auto; }
+#swatches { display: flex; align-items: center; }
+.sw {
+  all: unset; box-sizing: border-box; width: 34px; height: 40px; display: grid; place-items: center; cursor: pointer;
+}
+.sw::before {
+  content: ""; width: 18px; height: 18px; border-radius: 50%; background: var(--g);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .5), 0 1px 4px rgba(40, 20, 15, .3), inset 0 -2px 3px rgba(0, 0, 0, .16);
+  transition: transform .4s cubic-bezier(.2, .7, .2, 1), box-shadow .4s ease;
+}
+.sw[aria-checked="true"]::before {
+  transform: scale(1.24);
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .95), 0 0 0 3.5px var(--ink-soft), 0 2px 6px rgba(40, 20, 15, .3), inset 0 -2px 3px rgba(0, 0, 0, .16);
+}
+.sw:focus-visible::before { outline: 2px solid var(--ink); outline-offset: 4px; }
+
+#tools { display: flex; gap: 8px; }
+.tool {
+  all: unset; box-sizing: border-box; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  background: var(--glass); box-shadow: inset 0 0 0 1px var(--glass-edge); color: var(--ink);
+  transition: background .3s ease, transform .2s ease, opacity .4s ease;
+}
+.tool svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tool:active { transform: scale(.93); }
+#toolbtn[aria-expanded="true"] { background: var(--glass-on); }
+.tool[disabled] { opacity: .4; cursor: default; }
+.tool:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (hover: hover) and (pointer: fine) {
+  body.cur #sand { cursor: none; }
+}
+#toolwrap { position: relative; }
+#menu {
+  position: absolute; right: 0; bottom: 48px; min-width: 196px; padding: 6px; border-radius: 18px;
+  display: flex; flex-direction: column; gap: 1px; color: var(--ink);
+  background: var(--panel); box-shadow: inset 0 0 0 1px var(--glass-edge), 0 12px 36px rgba(40, 20, 15, .24);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+  transform-origin: 88% 100%; animation: menu-in .2s cubic-bezier(.2, .8, .2, 1);
+}
+#menu[hidden] { display: none; }
+@keyframes menu-in { from { opacity: 0; transform: translateY(8px) scale(.97); } }
+.mi {
+  all: unset; box-sizing: border-box; display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 16px 0 12px;
+  border-radius: 12px; cursor: pointer; font-size: 13.5px; letter-spacing: .01em; white-space: nowrap;
+}
+.mi svg { width: 19px; height: 19px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mi[aria-checked="true"] { background: var(--glass-on); box-shadow: inset 0 0 0 1px var(--glass-edge); }
+.mi:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+@media (hover: hover) { .mi:hover { background: var(--glass); } .mi[aria-checked="true"]:hover { background: var(--glass-on); } }
+.sep { height: 1px; margin: 5px 12px; background: var(--ink-soft); opacity: .6; }
+body.drawing #menu { display: none; }
+#sound .off { display: none; }
+#sound[aria-pressed="false"] .on { display: none; }
+#sound[aria-pressed="false"] .off { display: inline; }
+
+#hint, #label {
+  position: absolute; margin: 0; pointer-events: none; opacity: 0;
+  font-size: 11px; font-weight: 500; letter-spacing: .16em; text-transform: uppercase; line-height: 1.8;
+  text-shadow: 0 0 10px var(--halo), 0 0 3px var(--halo);
+  transition: opacity 1s ease;
+}
+#hint { left: 0; right: 0; top: calc(22px + env(safe-area-inset-top)); padding: 0 28px; text-align: center; text-wrap: balance; }
+#label { left: calc(19px + env(safe-area-inset-left)); bottom: calc(60px + env(safe-area-inset-bottom)); }
+#hint.show, #label.show { opacity: .78; }
+body.drawing #hint.show, body.drawing #label.show { opacity: .1; }
+
+#cur {
+  position: absolute; left: 0; top: 0; width: var(--cs, 20px); height: var(--cs, 20px);
+  margin: calc(var(--cs, 20px) / -2) 0 0 calc(var(--cs, 20px) / -2); border-radius: 50%;
+  pointer-events: none; opacity: 0; will-change: transform;
+  /* тёмное кольцо в светлой обводке: видно и на белом песке, и на чёрном */
+  box-shadow: 0 0 0 1.5px var(--ring), 0 0 0 3px var(--ring-halo), inset 0 0 0 1.5px var(--ring-halo);
+  transition: width .28s cubic-bezier(.2, .7, .2, 1), height .28s cubic-bezier(.2, .7, .2, 1), margin .28s cubic-bezier(.2, .7, .2, 1), opacity .3s ease;
+}
+#cur.on { opacity: 1; }
+#cur.down { opacity: .5; }
+
+#fail {
+  position: absolute; inset: 0; display: grid; place-items: center; padding: 32px; text-align: center;
+  font-size: 15px; line-height: 1.6; color: rgba(74, 44, 40, .9); background: var(--sand);
+}
+#fail[hidden] { display: none; }
+#fail p { max-width: 34ch; margin: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ui, #hint, #label, #cur, .sw::before, .tool { transition-duration: .01s; }
+  #menu { animation: none; }
+}
+</style>
+</head>
+<body>
+<canvas id="sand" role="img" aria-label="Песок. Проведите по нему, чтобы оставить борозду"></canvas>
+<div id="cur" aria-hidden="true"></div>
+<p id="hint" class="ui"></p>
+<p id="label" class="ui" aria-live="polite"></p>
+<div id="dock" class="ui">
+  <div id="swatches" role="radiogroup" aria-label="Цвет песка"></div>
+  <div id="tools">
+    <div id="toolwrap">
+      <div id="menu" role="menu" aria-label="Инструменты" hidden></div>
+      <button id="toolbtn" class="tool" type="button" aria-haspopup="menu" aria-expanded="false" aria-label="Инструменты" title="Инструменты"></button>
+    </div>
+    <button id="wave" class="tool" type="button" aria-label="Волна: смыть рисунок" title="Волна">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9.5q2.25-3.4 4.5 0t4.5 0t4.5 0t4.5 0M3 15.5q2.25-3.4 4.5 0t4.5 0t4.5 0t4.5 0"/></svg>
+    </button>
+    <button id="sound" class="tool" type="button" aria-pressed="true" aria-label="Звук" title="Звук">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4h3l4.2 3.6V6.4L7 10z"/><path class="on" d="M15 9.4a3.6 3.6 0 0 1 0 5.2M17.6 7a7 7 0 0 1 0 10"/><path class="off" d="M15.5 9.8l4.4 4.4M19.9 9.8l-4.4 4.4"/></svg>
+    </button>
+  </div>
+</div>
+<div id="fail" hidden><p>Не получилось запустить WebGL. Обновите браузер или откройте страницу в другом.</p></div>
+
+<script>
+(function () {
+'use strict';
+
+/* ───────────── помощники ───────────── */
+const $ = (s) => document.querySelector(s);
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const sstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+const hexLin = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => Math.pow(c / 255, 2.2)); };
+const FLAGS = new URLSearchParams(location.search);
+const MANUAL = FLAGS.has('manual');
+let vnow = 0;
+const clock = () => (MANUAL ? vnow : performance.now());
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const coarse = matchMedia('(pointer: coarse)').matches;
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+};
+
+/* ───────────── палитры ───────────── */
+const PALETTES = [
+  { name: 'Розовое шампанское', alb: '#e6bfb3', sp: [['#f7e6da', .22], ['#d49a93', .10], ['#8e5852', .012]],
+    sun: [1.21, .95, .70], sky: [.72, .84, 1.34], glit: '#ffeee2', glitAmt: 1.0, spec: .05, dark: false,
+    sw: 'radial-gradient(circle at 34% 30%, #fbe6dc, #e6b9ad 58%, #c39188)', bg: '#e2b9ac' },
+  { name: 'Белый мальдивский', alb: '#efe7d8', sp: [['#fffdf6', .26], ['#ddd0b9', .09], ['#b9aa9b', .008]],
+    sun: [1.12, .99, .83], sky: [.80, .90, 1.30], glit: '#ffffff', glitAmt: .9, spec: .05, dark: false,
+    sw: 'radial-gradient(circle at 34% 30%, #ffffff, #efe6d6 58%, #cfc3b2)', bg: '#ece3d3' },
+  { name: 'Золотая пустыня', alb: '#dba75f', sp: [['#f0cb8b', .18], ['#c2823f', .12], ['#6d4424', .014]],
+    sun: [1.15, .98, .78], sky: [.88, .80, 1.10], glit: '#ffe9b8', glitAmt: 1.05, spec: .06, dark: false,
+    sw: 'radial-gradient(circle at 34% 30%, #f6d596, #d9a258 58%, #a97332)', bg: '#d9a45b' },
+  { name: 'Терракотовый каньон', alb: '#b9634a', sp: [['#d48a6b', .16], ['#96452f', .14], ['#4e241b', .02]],
+    sun: [1.15, .97, .80], sky: [.86, .80, 1.15], glit: '#ffdcc4', glitAmt: .95, spec: .06, dark: false,
+    sw: 'radial-gradient(circle at 34% 30%, #dc9274, #b65f46 58%, #863b29)', bg: '#b6604a' },
+  { name: 'Чёрный вулканический', alb: '#2c2a2a', sp: [['#151415', .26], ['#4b4744', .12], ['#8f6c2b', .014]],
+    sun: [1.15, 1.0, .82], sky: [.75, .85, 1.30], glit: '#ffc860', glitAmt: 2.4, spec: .10, dark: true,
+    sw: 'radial-gradient(circle at 34% 30%, #5a5450, #2b2928 58%, #0e0d0d)', bg: '#2a2827' }
+];
+const palVec = (p) => [].concat(hexLin(p.alb), hexLin(p.sp[0][0]), hexLin(p.sp[1][0]), hexLin(p.sp[2][0]),
+  [p.sp[0][1], p.sp[1][1], p.sp[2][1]], p.sun, p.sky, hexLin(p.glit), [p.glitAmt, p.spec]);
+
+/* ───────────── шейдеры ───────────── */
+const VS = 'attribute vec2 aPos;void main(){gl_Position=vec4(aPos,0.0,1.0);}';
+
+const COMMON = `
+#define SIN_EL 0.4384
+#define COS_EL 0.8988
+#define TAN_EL 0.4877
+const vec2 L2 = vec2(-0.7399, -0.6727);          // направление на солнце в плоскости экрана (y вниз)
+const mat2 ROT = mat2(0.8, -0.6, 0.6, 0.8);
+const float W_T1 = 2.1;                           // накат волны, с
+const float W_TH = 0.2;                           // пауза
+const float W_T2 = 3.7;                           // откат
+float hash12(vec2 p){ vec3 q = fract(vec3(p.xyx) * .1031); q += dot(q, q.yzx + 33.33); return fract((q.x + q.y) * q.z); }
+vec2 hash22(vec2 p){ vec3 q = fract(vec3(p.xyx) * vec3(.1031, .1030, .0973)); q += dot(q, q.yzx + 33.33); return fract((q.xx + q.yz) * q.zy); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  f = f*f*f*(f*(f*6.0 - 15.0) + 10.0);
+  float a = hash12(i), b = hash12(i + vec2(1.0, 0.0)), c = hash12(i + vec2(0.0, 1.0)), d = hash12(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+#ifdef PACKED
+float getH(vec4 c){ return ((floor(c.r*255.0 + 0.5)*256.0 + floor(c.g*255.0 + 0.5))/65535.0 - 0.5)*48.0; }
+vec2 putH(float h){ float v = floor(clamp(h/48.0 + 0.5, 0.0, 1.0)*65535.0 + 0.5); float hi = floor(v/256.0); return vec2(hi, v - hi*256.0)/255.0; }
+#else
+float getH(vec4 c){ return c.r; }
+vec2 putH(float h){ return vec2(h, 0.0); }
+#endif
+// нетронутый песок: пологие наплывы и мелкая шероховатость (высоты в css-пикселях)
+float baseLow(vec2 p){ return (vnoise(p*0.0042 + 3.7) - 0.5)*4.2 + (vnoise(ROT*p*0.0125 + 11.3) - 0.5)*1.25; }
+float baseFine(vec2 p){ return (vnoise(ROT*p*0.105 + 5.1) - 0.5)*0.17 + (vnoise(p*0.26 + 9.4) - 0.5)*0.075; }
+float baseH(vec2 p){ return baseLow(p) + baseFine(p); }
+// волна: насколько точка p ушла под воду (в пикселях за кромкой), sz — размер мира
+float waveA(float t){
+  float up = 1.0 - pow(1.0 - clamp(t/W_T1, 0.0, 1.0), 2.4);
+  float dn = pow(clamp((t - W_T1 - W_TH)/W_T2, 0.0, 1.0), 1.7);
+  return up*(1.0 - dn);
+}
+float waveDepth(vec2 p, float t, vec2 sz){
+  float m = min(sz.x, sz.y), amp = m*0.065, xn = p.x/m;
+  float wob = sin(xn*2.9 + 0.7 + t*0.33)*0.9 + sin(xn*6.7 - t*0.71 + 2.0)*0.42
+            + (vnoise(vec2(xn*8.0, t*0.45)) - 0.5)*0.9 + (vnoise(vec2(xn*27.0, t*0.8 + 7.0)) - 0.5)*0.26;
+  float front = waveA(t)*(sz.y + amp*4.2 + 50.0) - amp*2.1 - 36.0 + wob*amp;
+  return front - (sz.y - p.y);
+}
+`;
+
+const FS_INIT = `
+uniform sampler2D uOld; uniform vec2 uOldSize; uniform float uHasOld, uS;
+void main(){
+  vec2 fc = gl_FragCoord.xy;
+  if (uHasOld > 0.5 && fc.x < uOldSize.x && fc.y < uOldSize.y) gl_FragColor = texture2D(uOld, fc/uOldSize);
+  else gl_FragColor = vec4(putH(baseH(fc/uS)), 0.0, 0.0);
+}`;
+
+const FS_BRUSH = `
+uniform sampler2D uSim; uniform vec2 uSimSize; uniform float uS;
+uniform vec2 uA, uB, uR; uniform float uMode, uStart; uniform vec3 uK;   // uK: глубина/r, показатель дна, валик/r
+#ifdef PACKED
+#define TEX(t) ((floor(t) + 0.5)/uSimSize)
+#else
+#define TEX(t) ((t)/uSimSize)
+#endif
+float HT(vec2 t){ return getH(texture2D(uSim, TEX(t))); }
+void main(){
+  vec4 c = texture2D(uSim, gl_FragCoord.xy/uSimSize);
+  float h = getH(c);
+  vec2 p = gl_FragCoord.xy/uS;
+  vec2 ab = uB - uA; float len = length(ab);
+  vec2 dir = len > 1e-3 ? ab/len : vec2(1.0, 0.0);
+  float along = dot(p - uA, dir);
+  float t = len > 1e-3 ? clamp(along/len, 0.0, 1.0) : 0.0;
+  float d = length(p - uA - ab*t);
+  float r = mix(uR.x, uR.y, t);
+  const float RW = 1.0;
+  float cut = uStart < 0.5 ? smoothstep(-2.5, 0.5, along) : 1.0;
+  if (uMode < 0.5 || (uMode > 1.5 && uMode < 2.5)) {
+    // палец (и вдавленный предмет): новый след ложится поверх старого. Песок сыпучий:
+    // рядом с новым следом старые гребни осыпаются, старая борозда под валиком засыпается лишь наполовину,
+    // старый валик у новой кромки срезается. Повторные проходы дают мягкую форму, а не слои.
+    float u = d/(r*(0.93 + 0.14*vnoise(p*0.085 + 17.0)));
+    float depth = r*uK.x, b = baseLow(p), hs = h, hn;
+    if (uMode < 0.5) {
+      // осыпание: всё вокруг пальца (и позади него) чуть сглаживается, острые гребни не держатся
+      vec2 tc = gl_FragCoord.xy; float e = max(0.16*r, 1.0)*uS;
+      float hb = 0.25*(HT(tc + vec2(e, 0.0)) + HT(tc - vec2(e, 0.0)) + HT(tc + vec2(0.0, e)) + HT(tc - vec2(0.0, e)));
+      hs = mix(h, hb, (1.0 - exp(-(uStart > 0.5 ? 0.8 : len*0.55/r)))*(1.0 - smoothstep(1.8, 2.8, u)));
+    }
+    if (u < 1.0) {
+      float T = b - depth*(1.0 - pow(u, uK.y));
+      float kk = 0.3*depth, sm = clamp(0.5 - 0.5*(hs - T)/kk, 0.0, 1.0);
+      float lo = mix(0.0, hs - T, sm) - kk*sm*(1.0 - sm);            // мягкий минимум: без острой складки
+      hn = T + lo*(1.0 - mix(0.5, 1.0, smoothstep(-0.7*depth, -0.05*depth, lo)));
+    } else {
+      float s = min((u - 1.0)/RW, 1.0);
+      float lump = mix(1.0, 0.86 + 0.24*vnoise(p*0.062 + 31.0) + 0.10*(vnoise(ROT*p*0.21 + 7.0) - 0.5), smoothstep(0.0, 0.3, s));
+      float top = b + r*uK.z*6.75*s*(1.0 - s)*(1.0 - s)*lump;
+      hn = min(hs, top + 9.0*smoothstep(1.25, 1.9, u));
+      hn += max(top - hn, 0.0)*mix(0.5, 1.0, smoothstep(-0.7*depth, -0.05*depth, hn - b));
+      hn = mix(hs, hn, 1.0 - smoothstep(1.35, 2.0, u));
+    }
+    h = mix(hs, hn, cut);
+  } else if (uMode < 1.5) {
+    // пёрышко: возвращаем нетронутую поверхность; сила зависит от пройденного пути, край остаётся мягким
+    float f = 1.0 - smoothstep(0.25, 1.0, d/r);
+    float w = 1.0 - exp(-(uStart > 0.5 ? 2.5 : len*5.0/r)*f*sqrt(f));
+    h = mix(h, baseH(p), w);
+  } else if (uMode < 3.5) {
+    // грабельки: планка выравнивает песок под собой, пять зубцов оставляют ровные бороздки
+    float rt = uR.x, sp = uR.y;
+    float lat = dot(p - uA, vec2(-dir.y, dir.x));
+    float halfW = 2.0*sp + rt*1.6;
+    float w = smoothstep(-1.5, 0.5, along)*(1.0 - smoothstep(len + 0.5, len + 2.5, along))*(1.0 - smoothstep(halfW, halfW + 5.0, abs(lat)));
+    float xt = lat - sp*clamp(floor(lat/sp + 0.5), -2.0, 2.0);
+    float u = abs(xt)/rt;
+    float prof = u < 1.0 ? -rt*0.62*(1.0 - pow(u, 2.2)) : rt*0.26*sin(3.14159*min((u - 1.0)/0.6, 1.0));
+    prof *= 0.88 + 0.24*vnoise(p*0.11 + 3.0);
+    h = mix(h, baseLow(p) + prof + baseFine(p)*0.5, w);
+  } else {
+    // палочка: тонкая линия относительно того рельефа, по которому она идёт
+    vec2 nrm = vec2(-dir.y, dir.x);
+    vec2 cc = (uA + ab*t)*uS;
+    float ref = 0.25*(HT(cc + nrm*(2.5*r*uS)) + HT(cc - nrm*(2.5*r*uS)) + HT(cc + nrm*(3.6*r*uS)) + HT(cc - nrm*(3.6*r*uS)));
+    float u = d/r, prof;
+    if (u < 1.0) prof = -r*0.7*(1.0 - pow(u, 2.2));
+    else { float s = min((u - 1.0)/RW, 1.0); prof = r*0.228*6.75*s*(1.0 - s)*(1.0 - s); }
+    h = mix(h, ref + prof, (1.0 - smoothstep(1.15, 2.0, u))*cut);
+  }
+  gl_FragColor = vec4(putH(h), c.b, c.a);
+}`;
+
+const FS_ENV = `
+uniform sampler2D uSim; uniform vec2 uSimSize, uWorld; uniform float uS, uDt, uDryDt, uWaveT, uFinish;
+float H(vec2 uv){ return getH(texture2D(uSim, uv)); }
+void main(){
+  vec2 px = 1.0/uSimSize, uv = gl_FragCoord.xy*px;
+  vec4 c = texture2D(uSim, uv);
+  float h = getH(c), wet = c.b, foam = c.a;
+  vec2 p = gl_FragCoord.xy/uS;
+  float dpx = -1e4;
+  if (uWaveT >= 0.0) {
+    dpx = waveDepth(p, uWaveT, uWorld);
+    if (dpx > 0.0) {
+      float hb = 0.25*(H(uv + vec2(px.x, 0.0)) + H(uv - vec2(px.x, 0.0)) + H(uv + vec2(0.0, px.y)) + H(uv - vec2(0.0, px.y)));
+      float k = 1.0 - exp(-uDt*mix(5.0, 13.0, smoothstep(0.0, 60.0, dpx)));
+      h = mix(mix(h, hb, 0.85), baseH(p), k);
+      // на откате кромка оставляет пену, которая потом лопается
+      float back = step(W_T1 + W_TH*0.5, uWaveT);
+      float edge = 1.0 - smoothstep(0.0, 18.0, dpx);
+      foam = max(foam, back*edge*(0.3 + 0.7*vnoise(p*0.07 + 3.0)));
+    }
+    wet = max(wet, smoothstep(-5.0, 1.0, dpx));
+  }
+  if (uFinish > 0.5 && dpx > 0.0) h = baseH(p);
+  if (dpx <= 0.0 && uDryDt > 0.0) {
+    if (wet > 0.0) {
+      float yT = clamp(p.y/uWorld.y, 0.0, 1.0);
+      float T = mix(5.5, 11.0, pow(yT, 0.8))*(0.72 + 0.4*vnoise(p*0.011 + 40.0) + 0.16*vnoise(p*0.05 + 60.0));
+      wet = max(0.0, wet - uDryDt/T);
+    }
+    foam = max(0.0, foam - uDryDt*0.45);
+  }
+  gl_FragColor = vec4(putH(h), wet, foam);
+}`;
+
+// предметы сада: галька, ракушка, морская звезда. Одна и та же форма даёт и тень на песке, и картинку
+const OBJ = `
+#define NOBJ 12
+uniform vec4 uObjA[NOBJ];     // x, y, размер, поворот
+uniform vec4 uObjB[NOBJ];     // тип, зерно, масштаб
+uniform int uObjN;
+// (высота, _, относительный радиус: 1 на краю)
+vec3 objEval(float type, vec2 q, float R, float seed){
+  if (type < 1.5) {
+    float asp = 0.70 + 0.24*fract(seed*7.13);
+    vec2 e = q/vec2(R, R*asp);
+    float a = atan(e.y, e.x);
+    float rr = length(e)/(1.0 + 0.07*sin(a*2.0 + seed*9.0) + 0.045*sin(a*3.0 + seed*23.0) + 0.02*sin(a*5.0 + seed*41.0));
+    return vec3(rr < 1.0 ? R*(0.30 + 0.14*fract(seed*3.7))*pow(1.0 - rr*rr, 0.36) : 0.0, 0.0, rr);
+  } else if (type < 2.5) {
+    vec2 v = q - vec2(0.0, 0.8*R);
+    float ang = atan(v.x, -v.y);
+    float rho = 1.55*R*pow(max(cos(ang*0.68), 0.0), 0.75)*(1.0 + 0.03*cos(ang*13.0))*(1.0 - smoothstep(1.2, 1.8, abs(ang)));
+    float rr = length(v)/max(rho, 1e-3);
+    float rib = 0.5 + 0.5*cos(ang*13.0);
+    return vec3(rr < 1.0 ? R*0.24*pow(1.0 - rr*rr, 0.42)*(0.80 + 0.20*rib*smoothstep(0.12, 0.5, rr))*(1.5 - 0.5*rr) : 0.0, 0.0, rr);
+  }
+  float len = length(q);
+  float a = atan(q.y, q.x) + 0.30*(len/R)*sin(seed*17.0);
+  float lobe = 0.5 + 0.5*cos(5.0*a);
+  float rr = len/(R*(0.30 + 0.70*pow(lobe, 1.7)));
+  return vec3(rr < 1.0 ? R*0.17*pow(1.0 - rr*rr, 0.5)*(0.55 + 0.45*lobe)*(0.9 + 0.2*vnoise(q*0.55 + seed*31.0)) : 0.0, 0.0, rr);
+}
+vec3 objColor(float type, vec2 q, float R, float seed, float rr){
+  if (type < 1.5) {
+    float k = fract(seed*5.31);
+    vec3 a = k < 0.34 ? vec3(0.17, 0.165, 0.175) : (k < 0.67 ? vec3(0.40, 0.37, 0.34) : vec3(0.62, 0.57, 0.50));
+    a *= (0.80 + 0.34*vnoise(q*0.16 + seed*13.0))*(0.93 + 0.14*hash12(floor(q*1.4) + seed*7.0));
+    float vein = 1.0 - smoothstep(0.0, 0.035, abs(vnoise(q*0.06 + seed*3.0) - 0.5));
+    return mix(a, vec3(0.74, 0.71, 0.67), vein*0.4*step(0.45, fract(seed*11.7)));
+  } else if (type < 2.5) {
+    vec2 v = q - vec2(0.0, 0.8*R);
+    float ang = atan(v.x, -v.y);
+    float band = 0.5 + 0.5*sin(length(v)/R*15.0 + 1.5*vnoise(q*0.2 + seed));
+    vec3 c = mix(vec3(0.90, 0.80, 0.68), vec3(0.80, 0.42, 0.33), smoothstep(0.25, 1.0, rr)*0.5 + 0.18*band);
+    return c*(0.84 + 0.16*(0.5 + 0.5*cos(ang*13.0)));
+  }
+  float dots = smoothstep(0.60, 0.74, vnoise(q*0.55 + seed*31.0));
+  return mix(vec3(0.76, 0.24, 0.11), vec3(0.95, 0.56, 0.30), dots*0.8 + 0.28*(1.0 - rr));
+}
+`;
+
+const FS_OBJ = OBJ + `
+uniform float uS;
+void main(){
+  vec2 p = gl_FragCoord.xy/uS;
+  float hm = 0.0;
+  for (int i = 0; i < NOBJ; i++) {
+    if (i >= uObjN) break;
+    vec4 A = uObjA[i], B = uObjB[i];
+    float R = A.z*B.z;
+    vec2 dq = p - A.xy;
+    if (R < 0.5 || dot(dq, dq) > R*R*3.0) continue;
+    float cs = cos(A.w), sn = sin(A.w);
+    hm = max(hm, objEval(B.x, vec2(cs*dq.x + sn*dq.y, cs*dq.y - sn*dq.x), R, B.y).x);
+  }
+  gl_FragColor = vec4(hm/24.0, 0.0, 0.0, 1.0);
+}`;
+
+const FS_SHADE = `
+uniform sampler2D uSim, uObj; uniform vec2 uSimSize; uniform float uS, uHasObj;
+#ifdef PACKED
+#define SNAP(o) floor((o) + 0.5)
+#else
+#define SNAP(o) (o)
+#endif
+float HS(vec2 uv){ return getH(texture2D(uSim, uv)); }
+float H(vec2 uv){ float h = HS(uv); if (uHasObj > 0.5) h += texture2D(uObj, uv).r*24.0; return h; }
+void main(){
+  vec2 px = 1.0/uSimSize, uv = gl_FragCoord.xy*px;
+  float h0 = H(uv);
+  float e2 = 2.0/uS;
+  // нормаль берём только от песка: предметы рисуются отдельно, а на песок дают тень
+  float hx = (HS(uv + vec2(px.x, 0.0)) - HS(uv - vec2(px.x, 0.0)))/e2;
+  float hy = (HS(uv + vec2(0.0, px.y)) - HS(uv - vec2(0.0, px.y)))/e2;
+  vec3 n = normalize(vec3(-hx, -hy, 1.0));
+  // тень: наибольший угол горизонта в сторону солнца
+  float m = -10.0;
+  for (int i = 0; i < 12; i++) {
+    float fi = float(i);
+    float t = 1.0 + fi*1.15 + fi*fi*0.17;
+    vec2 o = SNAP(L2*t*uS);
+    m = max(m, (H(uv + o*px) - h0)/max(length(o)/uS, 0.5));
+  }
+  float vis = 1.0 - smoothstep(TAN_EL - 0.17, TAN_EL + 0.09, m);
+  // рассеянный свет гасится в ложбинах
+  float occ = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i)*0.7853982 + 0.39;
+    float rr = mod(float(i), 2.0) < 0.5 ? 5.0 : 11.0;
+    vec2 o = SNAP(vec2(cos(a), sin(a))*rr*uS);
+    occ += max((H(uv + o*px) - h0)/rr, 0.0);
+  }
+  float ao = clamp(1.0 - occ*0.125*2.4, 0.0, 1.0);
+  gl_FragColor = vec4(n.xy*(127.0/255.0) + 127.0/255.0, vis, ao);
+}`;
+
+const FS_SHOW = OBJ + `
+uniform sampler2D uShade, uSim;
+uniform vec2 uRes, uRS, uWorld, uTexScale, uTilt;
+uniform float uTime, uWaveT, uGlitAmt, uSpec;
+uniform vec3 uAlb, uSpA, uSpB, uSpC, uFrac, uSun, uSky, uGlit;
+const vec3 HV = vec3(-0.3921, -0.3565, 0.8481);
+const vec3 SHEEN = vec3(1.0, 0.80, 0.68);
+
+vec3 tone(vec3 x){
+  const float a = 0.62;
+  vec3 y = a + (1.0 - a)*(1.0 - exp(-(x - a)/(1.0 - a)));
+  return mix(x, y, step(a, x));
+}
+// одна искра на ячейку: загорается, когда её грань f совпадает с направлением блика g
+float sparkle(vec2 fc, vec2 g, float cell, float rad, float sig, float seed, out float rnd){
+  vec2 id = floor(fc/cell);
+  vec2 f = (hash22(id*1.31 + seed + 11.0) - 0.5)*2.4;
+  vec2 e = mod(f - g + 1.2, 2.4) - 1.2;
+  float a = exp(-dot(e, e)/(sig*sig));
+  rnd = hash12(id + seed*3.1 + 5.0);
+  float pad = min(1.6*rad/cell, 0.45);
+  vec2 ctr = (id + pad + hash22(id + seed + 2.0)*(1.0 - 2.0*pad))*cell;
+  vec2 d = fc - ctr;
+  float dd = dot(d, d)/(rad*rad);
+  return a*(exp(-dd) + 0.16*exp(-dd*0.16))*(0.45 + 0.9*rnd);
+}
+// бегущая по дну сетка света под тонкой водой
+float caust(vec2 q, float t){
+  vec2 w = q + 0.8*vec2(sin(q.y*1.3 + t*0.9), cos(q.x*1.1 - t*0.8));
+  float a = sin(w.x*2.1 + t*0.6) + sin(w.y*2.3 - t*0.7) + sin((w.x + w.y)*1.4 + t*0.5) + sin((w.x - w.y)*1.7 - t*0.4);
+  return pow(max(1.0 - abs(a)*0.45, 0.0), 4.0);
+}
+void main(){
+  vec2 fc = gl_FragCoord.xy;
+  vec2 p = vec2(fc.x, uRes.y - fc.y)/uRS;
+  vec2 uv = p*uTexScale;
+
+  float dpx = -1e4, wmask = 0.0; vec2 wn = vec2(0.0);
+  if (uWaveT >= 0.0) {
+    dpx = waveDepth(p, uWaveT, uWorld);
+    wmask = smoothstep(0.0, 3.0, dpx);
+    if (wmask > 0.0) {
+      float t = uWaveT;
+      wn = vec2(sin(p.y*0.061 + t*2.3 + sin(p.x*0.043 + t*0.7)*1.9), cos(p.x*0.057 - t*1.9 + sin(p.y*0.039 - t*0.6)*2.1));
+      wn += 0.5*vec2(sin(p.x*0.13 + p.y*0.11 - t*3.1), cos(p.y*0.15 - p.x*0.09 + t*2.7));
+      uv += wn*(wmask*min(dpx*0.05, 1.0)*1.6)*uTexScale;
+    }
+  }
+
+  vec4 sh = texture2D(uShade, uv);
+  vec4 sm = texture2D(uSim, uv);
+  vec2 nxy = (sh.rg*255.0 - 127.0)/127.0;
+  float vis = sh.b, ao = sh.a;
+  float wet = max(sm.b, wmask), foamRes = sm.a;
+  float film = smoothstep(0.80, 1.0, wet);
+  float damp = smoothstep(0.0, 0.30, wet);
+
+  // зерно: каждая песчинка чуть по-своему повёрнута к свету и чуть своего цвета
+  float g1 = hash12(fc + 3.31);
+  vec2 c2 = floor(fc*0.5);
+  float g2 = hash12(c2 + 51.9);
+  vec2 gn = (hash22(fc + 19.7) - 0.5) + (hash22(c2 + 7.13) - 0.5)*0.6;
+  float nz = sqrt(max(1.0 - dot(nxy, nxy), 0.05));
+  vec3 N0 = vec3(nxy, nz);
+  vec3 N = normalize(vec3(nxy + gn*mix(0.20, 0.07, film), nz));
+  vec3 L = vec3(L2*COS_EL, SIN_EL);
+  float ndl = max(dot(N, L), 0.0);
+  float ndl0 = max(dot(N0, L), 0.0);
+
+  vec3 alb = uAlb;
+  float f1 = uFrac.x, f2 = f1 + uFrac.y, f3 = f2 + uFrac.z;
+  if (g1 < f1) alb = uSpA; else if (g1 < f2) alb = uSpB; else if (g1 < f3) alb = uSpC;
+  alb *= 0.88 + 0.24*g2;
+  alb *= 1.0 - 0.22*step(0.94, fract(g1*91.7));
+  if (damp > 0.0) alb = mix(alb, pow(alb, vec3(1.35))*0.62, damp);
+
+  vec3 light = uSun*(ndl*vis*(0.68/SIN_EL)) + uSky*(0.25*ao*(0.75 + 0.25*N.z)) + uSun*(0.05*(1.0 - vis));
+  vec3 col = alb*light;
+  float sp = pow(max(dot(N, HV), 0.0), 14.0);
+  col += uSun*(sp*vis*(uSpec + 0.5*film));
+  // мокрый песок сразу после воды отражает небо, сильнее в сторону солнца
+  col += SHEEN*(film*(1.0 - wmask)*mix(0.09, 0.24, smoothstep(-0.55, 0.65, dot(L2, p/uWorld - 0.5)*1.6)));
+
+  // блёстки (на влажном песке их больше)
+  vec2 q = p/uWorld - 0.5;
+  vec2 g = uTilt + nxy*0.9 + q*0.6 + wn*(0.22*wmask);
+  vec2 gz = q*1.5 + clamp(uTilt, -0.7, 0.7)*0.8;
+  float zone = exp(-dot(gz, gz)*1.6);
+  float rA, rB;
+  float pxs = uRS.x;
+  float sA = sparkle(fc, g, max(3.0, 2.3*pxs), max(0.62, 0.42*pxs), 0.125, 0.0, rA);
+  float sB = sparkle(fc, g*0.83 + 0.37, max(8.0, 7.0*pxs), max(1.2, 0.85*pxs), 0.09, 37.0, rB);
+  float lit = (0.12 + 0.88*vis)*smoothstep(0.02, 0.40, ndl0)*mix(1.0, 1.7, damp)*mix(1.0, 0.75, film);
+  col += (mix(uGlit, vec3(1.0), 0.2 + 0.5*rA)*sA*1.6 + mix(uGlit, vec3(1.0), 0.1 + 0.4*rB)*sB*3.0)*(uGlitAmt*lit*(0.5 + 0.8*zone));
+
+  vec3 foamCol = uSun*0.86 + uSky*0.20;
+  if (wmask > 0.0) {
+    float t = uWaveT;
+    float deep = smoothstep(0.0, 260.0, dpx);
+    col *= mix(vec3(1.0), vec3(0.82, 0.95, 0.96), deep*0.55*wmask);
+    col *= 1.0 + wmask*smoothstep(3.0, 40.0, dpx)*(caust(p*0.035 + wn*0.25, t)*0.55 - 0.08);
+    vec3 Nw = normalize(vec3(wn*0.40, 1.0));
+    float glint = pow(max(dot(Nw, HV), 0.0), 90.0);
+    col += wmask*(SHEEN*(0.05 + 0.07*deep) + uSun*(glint*0.9));
+    float flow = waveA(t)*(uWorld.y + 120.0);
+    vec2 fq = vec2(p.x, p.y + flow*0.85);
+    float n1 = vnoise(fq*0.045 + wn*0.3);
+    float n2 = vnoise(fq*0.16 + 9.0);
+    float n3 = vnoise(fq*0.42 + 4.0);
+    float rise = 1.0 - smoothstep(W_T1*0.75, W_T1 + W_TH + 0.5, t);
+    float lip = 1.0 - smoothstep(0.0, mix(7.0, 30.0, rise)*(0.6 + 0.8*n1), dpx);
+    float dense = smoothstep(0.30, 0.62, lip*1.25 + (n2 - 0.5)*0.9 + (n3 - 0.5)*0.4 - 0.12);
+    float lace = (1.0 - smoothstep(0.0, 0.055, abs(n1 - 0.5)))*(0.35 + 0.65*n2)*exp(-dpx/mix(70.0, 240.0, rise));
+    float foam = clamp(max(dense, lace*0.75), 0.0, 1.0)*wmask;
+    col = mix(col, foamCol*(0.80 + 0.2*n3), foam*0.92);
+    col += uSun*(0.12*(1.0 - smoothstep(0.0, 2.5, dpx))*wmask);
+  }
+  if (foamRes > 0.004) {
+    float bub = hash12(c2 + 91.0);
+    col = mix(col, foamCol, step(bub, foamRes*0.42)*0.8*(1.0 - wmask));
+  }
+
+  // предметы лежат поверх песка и воды (этот цикл есть только в варианте шейдера «с предметами»)
+#ifdef OBJ_ON
+  for (int i = 0; i < NOBJ; i++) {
+    if (i >= uObjN) break;
+    vec4 A = uObjA[i], B = uObjB[i];
+    float R = A.z*B.z;
+    vec2 dq = p - A.xy;
+    if (R < 0.5 || dot(dq, dq) > R*R*3.0) continue;
+    float cs = cos(A.w), sn = sin(A.w);
+    vec2 ql = vec2(cs*dq.x + sn*dq.y, cs*dq.y - sn*dq.x);
+    const float E = 0.7;
+    vec3 e0 = objEval(B.x, ql, R, B.y);
+    vec3 e1 = objEval(B.x, ql + vec2(E, 0.0), R, B.y);
+    vec3 e2 = objEval(B.x, ql + vec2(0.0, E), R, B.y);
+    float dist = (1.0 - e0.z)*E/max(length(vec2(e1.z - e0.z, e2.z - e0.z)), 1e-4);
+    if (e0.z > 1.25) continue;
+    float al = clamp(dist*uRS.x + 0.5, 0.0, 1.0);
+    if (al <= 0.0) continue;
+    vec2 gh = vec2(e1.x - e0.x, e2.x - e0.x)/E;
+    gh = vec2(cs*gh.x - sn*gh.y, sn*gh.x + cs*gh.y);
+    gh *= min(1.0, 2.4/max(length(gh), 1e-4));
+    vec3 No = normalize(vec3(-gh, 1.0));
+    vec3 oa = objColor(B.x, ql, R, B.y, min(e0.z, 1.0))*mix(1.0, 0.72, damp);
+    float ovis = mix(1.0, vis, 0.55);
+    vec3 ol = uSun*(max(dot(No, L), 0.0)*ovis*(0.68/SIN_EL)) + uSky*(0.25*(0.6 + 0.4*No.z)) + uAlb*uSun*(0.12*(1.0 - No.z));
+    float gloss = B.x < 1.5 ? 0.10 : (B.x < 2.5 ? 0.30 : 0.07);
+    vec3 oc = oa*ol + uSun*(pow(max(dot(No, HV), 0.0), 26.0)*(gloss + 0.3*film)*ovis);
+    oc *= 0.70 + 0.30*smoothstep(0.0, 3.0, dist);
+    col = mix(col, oc, al);
+  }
+#endif
+
+  float fall = 1.0 + 0.34*dot(L2, (p - 0.5*uWorld)/max(uWorld.x, uWorld.y));
+  float vig = 1.0 - 0.16*smoothstep(0.30, 0.85, length(q));
+  col = tone(col*fall*vig);
+  gl_FragColor = vec4(pow(col, vec3(1.0/2.2)), 1.0);
+}`;
+
+/* ───────────── WebGL ───────────── */
+const canvas = $('#sand');
+let gl = null, isGL2 = false, fmt = null, packed = false, lost = false;
+let PR = null;                       // программы
+let sim = null, shade = null, objT = null;   // рельеф (пинг-понг), готовое освещение, высоты предметов
+let W = 1, H = 1, S = 1, quality = 1;
+let lastRect = null, dirty = null, needShow = true;
+const DPR_CAP = 2;
+const K_FINGER = [0.34, 2.2, 0.111];
+
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error('shader: ' + gl.getShaderInfoLog(s));
+  return s;
+}
+function program(fs, head) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl.VERTEX_SHADER, VS));
+  gl.attachShader(p, compile(gl.FRAGMENT_SHADER, head + COMMON + fs));
+  gl.bindAttribLocation(p, 0, 'aPos');
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error('link: ' + gl.getProgramInfoLog(p));
+  const u = {}, n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+function fboOk(internal, format, type) {
+  while (gl.getError() !== gl.NO_ERROR) { /* сбрасываем старые ошибки */ }
+  const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.texImage2D(gl.TEXTURE_2D, 0, internal, 4, 4, 0, format, type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+  const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE && gl.getError() === gl.NO_ERROR;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.deleteFramebuffer(f); gl.deleteTexture(t);
+  return ok;
+}
+function pickFormat() {
+  const bytes = { internal: gl.RGBA, format: gl.RGBA, type: gl.UNSIGNED_BYTE, packed: true };
+  if (FLAGS.has('packed')) return bytes;
+  if (isGL2) {
+    gl.getExtension('EXT_color_buffer_float'); gl.getExtension('EXT_color_buffer_half_float');
+    if (fboOk(gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT)) return { internal: gl.RGBA16F, format: gl.RGBA, type: gl.HALF_FLOAT, packed: false };
+  } else {
+    const hf = gl.getExtension('OES_texture_half_float'), lin = gl.getExtension('OES_texture_half_float_linear');
+    gl.getExtension('EXT_color_buffer_half_float');
+    if (hf && lin && fboOk(gl.RGBA, gl.RGBA, hf.HALF_FLOAT_OES)) return { internal: gl.RGBA, format: gl.RGBA, type: hf.HALF_FLOAT_OES, packed: false };
+  }
+  return bytes;
+}
+function target(w, h, f) {
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, f.internal, w, h, 0, f.format, f.type, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  return { tex, fbo };
+}
+function initGL() {
+  const opts = { alpha: false, antialias: false, depth: false, stencil: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: 'high-performance' };
+  gl = null; isGL2 = false;
+  if (!FLAGS.has('gl1')) { gl = canvas.getContext('webgl2', opts); isGL2 = !!gl; }
+  if (!gl) gl = canvas.getContext('webgl', opts) || canvas.getContext('experimental-webgl', opts);
+  if (!gl) return false;
+  fmt = pickFormat(); packed = fmt.packed;
+  const hp = gl.getShaderPrecisionFormat(gl.FRAGMENT_SHADER, gl.HIGH_FLOAT);
+  const head = 'precision ' + (hp && hp.precision > 0 ? 'highp' : 'mediump') + ' float;\n' + (packed ? '#define PACKED\n' : '');
+  PR = { init: program(FS_INIT, head), brush: program(FS_BRUSH, head), env: program(FS_ENV, head), shade: program(FS_SHADE, head), obj: program(FS_OBJ, head), show: program(FS_SHOW, head), showObj: program(FS_SHOW, head + '#define OBJ_ON\n') };
+  const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.disable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
+  sim = null; shade = null; objT = null;
+  return true;
+}
+const tri = () => gl.drawArrays(gl.TRIANGLES, 0, 3);
+function bindTex(unit, tex) { gl.activeTexture(gl.TEXTURE0 + unit); gl.bindTexture(gl.TEXTURE_2D, tex); }
+const fullRect = () => [0, 0, sim.w, sim.h];
+const unite = (a, b) => (a ? [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[2], b[2]), Math.max(a[3], b[3])] : b.slice());
+const clip = (r) => [clamp(r[0], 0, sim.w), clamp(r[1], 0, sim.h), clamp(r[2], 0, sim.w), clamp(r[3], 0, sim.h)];
+function scissor(r) { gl.enable(gl.SCISSOR_TEST); gl.scissor(r[0], r[1], r[2] - r[0], r[3] - r[1]); }
+
+function rebuild(sw, sh) {
+  const old = sim, a = target(sw, sh, fmt), b = target(sw, sh, fmt);
+  const bytes = { internal: gl.RGBA, format: gl.RGBA, type: gl.UNSIGNED_BYTE };
+  const sd = target(sw, sh, bytes), ob = target(sw, sh, bytes);
+  gl.useProgram(PR.init.p); gl.viewport(0, 0, sw, sh); gl.disable(gl.SCISSOR_TEST);
+  gl.uniform1i(PR.init.u.uOld, 0); gl.uniform1f(PR.init.u.uS, S);
+  gl.uniform1f(PR.init.u.uHasOld, old ? 1 : 0);
+  gl.uniform2f(PR.init.u.uOldSize, old ? old.w : 1, old ? old.h : 1);
+  bindTex(0, old ? old.t[old.cur].tex : null);
+  [a, b].forEach((t) => { gl.bindFramebuffer(gl.FRAMEBUFFER, t.fbo); tri(); });
+  if (old) { old.t.forEach((t) => { gl.deleteFramebuffer(t.fbo); gl.deleteTexture(t.tex); }); gl.deleteFramebuffer(shade.fbo); gl.deleteTexture(shade.tex); }
+  sim = { w: sw, h: sh, t: [a, b], cur: 0 }; shade = sd;
+  if (objT) { gl.deleteFramebuffer(objT.fbo); gl.deleteTexture(objT.tex); }
+  objT = ob;
+  lastRect = null; dirty = fullRect(); objDirty = objs.length ? fullRect() : null;
+}
+function layout() {
+  const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
+  const dpr = Math.min(window.devicePixelRatio || 1, DPR_CAP)*quality;
+  const cw = Math.max(1, Math.round(w*dpr)), ch = Math.max(1, Math.round(h*dpr));
+  if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+  W = w; H = h;
+  const sw = Math.ceil(w*S), sh = Math.ceil(h*S);
+  if (!sim || sim.w !== sw || sim.h !== sh) rebuild(sw, sh);
+  needShow = true;
+}
+
+/* проходы */
+function stamp(seg) {
+  const big = Math.max(seg.ra, seg.rb);
+  const m = (seg.mode === 1 ? big*1.05 : seg.mode === 3 ? 2*seg.rb + 1.6*seg.ra + 7 : seg.mode === 0 ? big*2.9 : big*2.2) + 2;
+  const r = clip([Math.floor((Math.min(seg.ax, seg.bx) - m)*S), Math.floor((Math.min(seg.ay, seg.by) - m)*S),
+                  Math.ceil((Math.max(seg.ax, seg.bx) + m)*S), Math.ceil((Math.max(seg.ay, seg.by) + m)*S)]);
+  if (r[2] <= r[0] || r[3] <= r[1]) return;
+  const dst = 1 - sim.cur, u = PR.brush.u, k = seg.k || K_FINGER;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sim.t[dst].fbo); gl.viewport(0, 0, sim.w, sim.h);
+  scissor(lastRect ? unite(r, lastRect) : r);
+  gl.useProgram(PR.brush.p); bindTex(0, sim.t[sim.cur].tex);
+  gl.uniform1i(u.uSim, 0); gl.uniform2f(u.uSimSize, sim.w, sim.h); gl.uniform1f(u.uS, S);
+  gl.uniform2f(u.uA, seg.ax, seg.ay); gl.uniform2f(u.uB, seg.bx, seg.by); gl.uniform2f(u.uR, seg.ra, seg.rb);
+  gl.uniform1f(u.uMode, seg.mode); gl.uniform1f(u.uStart, seg.start); gl.uniform3f(u.uK, k[0], k[1], k[2]);
+  tri();
+  sim.cur = dst; lastRect = r; dirty = unite(dirty, r);
+}
+function objPass(rect) {
+  const u = PR.obj.u;
+  objPack();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, objT.fbo); gl.viewport(0, 0, sim.w, sim.h); scissor(rect);
+  gl.useProgram(PR.obj.p); gl.uniform1f(u.uS, S); objUniforms(u);
+  tri();
+}
+function envPass(dt, dryDt, waveT, finish) {
+  const dst = 1 - sim.cur, u = PR.env.u;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, sim.t[dst].fbo); gl.viewport(0, 0, sim.w, sim.h); gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(PR.env.p); bindTex(0, sim.t[sim.cur].tex);
+  gl.uniform1i(u.uSim, 0); gl.uniform2f(u.uSimSize, sim.w, sim.h); gl.uniform2f(u.uWorld, W, H);
+  gl.uniform1f(u.uS, S); gl.uniform1f(u.uDt, dt); gl.uniform1f(u.uDryDt, dryDt); gl.uniform1f(u.uWaveT, waveT); gl.uniform1f(u.uFinish, finish ? 1 : 0);
+  tri();
+  sim.cur = dst; lastRect = fullRect();
+  if (waveT >= 0 || finish) dirty = fullRect();
+}
+function shadePass(rect) {
+  const m = Math.ceil(37*S) + 2, r = clip([rect[0] - m, rect[1] - m, rect[2] + m, rect[3] + m]), u = PR.shade.u;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, shade.fbo); gl.viewport(0, 0, sim.w, sim.h); scissor(r);
+  gl.useProgram(PR.shade.p); bindTex(1, objT.tex); bindTex(0, sim.t[sim.cur].tex);
+  gl.uniform1i(u.uObj, 1); gl.uniform1f(u.uHasObj, objs.length ? 1 : 0);
+  gl.uniform1i(u.uSim, 0); gl.uniform2f(u.uSimSize, sim.w, sim.h); gl.uniform1f(u.uS, S);
+  tri();
+}
+function showPass(time, waveT, tilt, pv) {
+  const pr = objs.length ? PR.showObj : PR.show, u = pr.u;
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.viewport(0, 0, canvas.width, canvas.height); gl.disable(gl.SCISSOR_TEST);
+  gl.useProgram(pr.p); bindTex(0, shade.tex); bindTex(1, sim.t[sim.cur].tex);
+  gl.uniform1i(u.uShade, 0); gl.uniform1i(u.uSim, 1);
+  gl.uniform2f(u.uRes, canvas.width, canvas.height); gl.uniform2f(u.uRS, canvas.width/W, canvas.height/H);
+  gl.uniform2f(u.uWorld, W, H); gl.uniform2f(u.uTexScale, S/sim.w, S/sim.h); gl.uniform2f(u.uTilt, tilt[0], tilt[1]);
+  gl.uniform1f(u.uTime, time); gl.uniform1f(u.uWaveT, waveT);
+  gl.uniform3f(u.uAlb, pv[0], pv[1], pv[2]); gl.uniform3f(u.uSpA, pv[3], pv[4], pv[5]); gl.uniform3f(u.uSpB, pv[6], pv[7], pv[8]);
+  gl.uniform3f(u.uSpC, pv[9], pv[10], pv[11]); gl.uniform3f(u.uFrac, pv[12], pv[13], pv[14]);
+  gl.uniform3f(u.uSun, pv[15], pv[16], pv[17]); gl.uniform3f(u.uSky, pv[18], pv[19], pv[20]); gl.uniform3f(u.uGlit, pv[21], pv[22], pv[23]);
+  gl.uniform1f(u.uGlitAmt, pv[24]); gl.uniform1f(u.uSpec, pv[25]);
+  if (objs.length) objUniforms(u);
+  tri();
+}
+
+/* ───────────── штрихи ───────────── */
+const strokes = new Map();
+const queue = [];
+let smoothGesture = false, contactSane = false;
+let drawDist = 0, smoothDist = 0, lastVib = 0;
+const canVib = typeof navigator.vibrate === 'function';
+const vibOk = () => canVib && (!navigator.userActivation || navigator.userActivation.hasBeenActive);
+const sizeK = () => clamp(Math.min(W, H)/400, 1, 1.4);
+const radiusFor = (v) => { const k = sizeK(); return (18 - 10.5*sstep(0.12, 1.8, v))*k; };   // быстрее ведёшь — тоньше след
+// режимы кисти: 0 палец, 1 пёрышко, 2 вдавленный предмет, 3 грабельки, 4 палочка
+const fixedR = (mode) => (mode === 3 ? 3.3 : 4.2)*sizeK();
+
+function emit(st, x, y) {
+  const d = Math.hypot(x - st.lx, y - st.ly);
+  if (d < 0.35) return;
+  let rb = st.r;
+  if (st.mode === 0) rb = st.r + (radiusFor(st.v) - st.r)*Math.min(1, d/28);
+  queue.push({ ax: st.lx, ay: st.ly, bx: x, by: y, ra: st.r, rb: st.mode === 3 ? 8.6*sizeK() : rb, mode: st.mode, start: 0 });
+  st.lx = x; st.ly = y; st.r = rb;
+  if (st.mode === 1) smoothDist += d; else drawDist += d;
+  if (st.type === 'touch' && vibOk()) {
+    st.hd += d;
+    const now = performance.now();
+    if (st.hd > 22 && now - lastVib > 34) { st.hd = 0; lastVib = now; try { navigator.vibrate(st.mode === 1 ? 3 : 5); } catch (e) {} }
+  }
+}
+function curveTo(st, cx, cy, ex, ey) {
+  const sx = st.lx, sy = st.ly;
+  const n = clamp(Math.ceil((Math.hypot(cx - sx, cy - sy) + Math.hypot(ex - cx, ey - cy))/3.5), 1, 28);
+  for (let i = 1; i <= n; i++) {
+    const t = i/n, a = (1 - t)*(1 - t), b = 2*t*(1 - t), c = t*t;
+    emit(st, a*sx + b*cx + c*ex, a*sy + b*cy + c*ey);
+  }
+}
+function begin(st) {
+  st.started = true;
+  st.r = st.mode === 1 ? st.rs : st.mode >= 3 ? fixedR(st.mode) : (st.v > 0.05 ? radiusFor(st.v) : radiusFor(0)*0.86);
+  if (st.mode !== 3) queue.push({ ax: st.x0, ay: st.y0, bx: st.x0, by: st.y0, ra: st.r, rb: st.r, mode: st.mode, start: 1 });
+  st.lx = st.x0; st.ly = st.y0; st.cx = st.x0; st.cy = st.y0;
+}
+function sample(st, x, y, t) {
+  const d = Math.hypot(x - st.tx, y - st.ty);
+  if (d < 1.1) return;
+  st.v += (d/Math.max(1, t - st.lt) - st.v)*0.35;
+  st.lt = t; st.tx = x; st.ty = y;
+  if (!st.started) { if (Math.hypot(x - st.x0, y - st.y0) < 3) return; begin(st); }
+  const mx = (st.cx + x)/2, my = (st.cy + y)/2;
+  curveTo(st, st.cx, st.cy, mx, my);
+  st.cx = x; st.cy = y;
+}
+function finish(st) {
+  if (!st.started) begin(st);
+  emit(st, st.cx, st.cy);
+}
+function toSmooth(st) {
+  if (st.mode === 1) return;
+  st.mode = 1; st.r = st.rs;
+  if (!st.started) return;
+  // палец успел оставить след до того, как лёг второй: стираем начало жеста
+  if (clock() - st.born < 350) queue.push({ ax: st.x0, ay: st.y0, bx: st.tx, by: st.ty, ra: st.rs, rb: st.rs, mode: 1, start: 1 });
+  else queue.push({ ax: st.lx, ay: st.ly, bx: st.lx, by: st.ly, ra: st.rs, rb: st.rs, mode: 1, start: 1 });
+}
+function addStroke(id, x, y, mode, type, contact, t) {
+  const st = { id, mode, type, x0: x, y0: y, tx: x, ty: y, lx: x, ly: y, cx: x, cy: y, lt: t, v: 0, r: 0,
+    rs: Math.max((type === 'touch' ? 46 : 42)*sizeK(), contact*0.5 + 26), started: false, born: clock(), hd: 0 };
+  strokes.set(id, st);
+  document.body.classList.add('drawing');
+  return st;
+}
+function dropStroke(id) {
+  strokes.delete(id);
+  if (!strokes.size) { smoothGesture = false; if (!grab) document.body.classList.remove('drawing'); }
+}
+
+/* ───────────── предметы ───────────── */
+const NOBJ = 12, TYPE = { stone: 1, shell: 2, star: 3 };
+const objs = [], objA = new Float32Array(NOBJ*4), objB = new Float32Array(NOBJ*4);
+let objDirty = null, grab = null;
+const objMark = (o) => { const m = o.size*1.85 + 3; objDirty = unite(objDirty, clip([Math.floor((o.x - m)*S), Math.floor((o.y - m)*S), Math.ceil((o.x + m)*S), Math.ceil((o.y + m)*S)])); };
+function objPack() {
+  objA.fill(0); objB.fill(0);
+  objs.forEach((o, i) => { objA.set([o.x, o.y, o.size, o.rot], i*4); objB.set([o.type, o.seed, o.scale, 0], i*4); });
+}
+function objUniforms(u) { gl.uniform4fv(u['uObjA[0]'], objA); gl.uniform4fv(u['uObjB[0]'], objB); gl.uniform1i(u.uObjN, objs.length); }
+function objHit(x, y) {
+  for (let i = objs.length - 1; i >= 0; i--) { const o = objs[i]; if (o.goal > 0 && Math.hypot(x - o.x, y - o.y) < o.size*(o.type === 2 ? 1.12 : 1.0)) return o; }
+  return null;
+}
+// предмет слегка вдавливается в песок: след остаётся, когда его уберут
+function objPress(o) {
+  const ra = o.size*(o.type === 1 ? 0.78 : 0.6), dep = o.type === 1 ? 1.3 + o.size*0.035 : 0.8;
+  queue.push({ ax: o.x, ay: o.y, bx: o.x, by: o.y, ra, rb: ra, mode: 2, start: 1, k: [dep/ra, 5, 0.5/ra] });
+}
+function objPlace(kind, x, y) {
+  const k = sizeK(), type = TYPE[kind];
+  if (objs.length >= NOBJ) { objMark(objs[0]); objs.shift(); }
+  const o = { type, x, y, seed: Math.random()*0.98 + 0.01, scale: 0, goal: 1,
+    size: (type === 1 ? 15 + Math.random()*13 : type === 2 ? 16 : 21)*k,
+    rot: type === 2 ? (Math.random() - 0.5)*1.5 : Math.random()*6.283 };
+  objs.push(o); objPress(o); objMark(o); thump();
+  return o;
+}
+function objStep(dt) {
+  for (let i = objs.length - 1; i >= 0; i--) {
+    const o = objs[i];
+    if (o.scale === o.goal) continue;
+    objMark(o);
+    o.scale += (o.goal - o.scale)*(1 - Math.exp(-dt*16));
+    if (Math.abs(o.goal - o.scale) < 0.006) o.scale = o.goal;
+    if (o.goal === 0 && o.scale === 0) objs.splice(i, 1);
+  }
+}
+
+/* ───────────── инструменты ───────────── */
+const starPath = (() => { let d = ''; for (let i = 0; i < 10; i++) { const a = -Math.PI/2 + i*Math.PI/5, r = i % 2 ? 3.9 : 8.7; d += (i ? 'L' : 'M') + (12 + Math.cos(a)*r).toFixed(1) + ' ' + (12.7 + Math.sin(a)*r).toFixed(1); } return d + 'Z'; })();
+const TOOLS = [
+  { id: 'finger', name: 'Ладошка', mode: 0, cur: 20, icon: '<path d="M7.6 13V6.6a1.35 1.35 0 0 1 2.7 0V11.2M10.3 11.2V4.7a1.35 1.35 0 0 1 2.7 0v6.5M13 11.2V5.5a1.35 1.35 0 0 1 2.7 0v6.3M15.7 12.2V8.4a1.35 1.35 0 0 1 2.7 0v6c0 3.7-2.7 6.6-6.3 6.6h-.9c-2.1 0-3.6-.9-4.8-2.5l-2.9-3.9a1.45 1.45 0 0 1 2.3-1.8L7.6 15"/>' },
+  { id: 'stick', name: 'Палочка', mode: 4, cur: 10, icon: '<path d="M7 17L19.5 4.5"/><circle cx="5.4" cy="18.6" r="1.2"/>' },
+  { id: 'rake', name: 'Грабельки', mode: 3, cur: 44, icon: '<g transform="rotate(42 12 12)"><path d="M12 1.5v13M6 14.5h12M6 14.5v5M10 14.5v5M14 14.5v5M18 14.5v5"/></g>' },
+  { id: 'feather', name: 'Пёрышко', mode: 1, cur: 66, note: 'Пёрышко разглаживает песок', icon: '<path d="M4.5 19.5l4.2-4.2"/><path d="M8.7 15.3c-1.2-5.4 3.4-10.8 10.8-10.8 0 7.4-5.4 12-10.8 10.8z"/><path d="M8.7 15.3l6.1-6.1"/>' },
+  { id: 'stone', name: 'Камень', obj: true, cur: 22, note: 'Камень. Касание кладёт и убирает', icon: '<path d="M4.5 14.2c0-4 3.4-7.2 7.9-7.2 4.2 0 7.1 2.5 7.1 6 0 3.4-3.1 5.6-7.6 5.6-4.4 0-7.4-1.4-7.4-4.4z"/><path d="M8 12.2c.8-1.6 2.3-2.6 4.2-2.8"/>' },
+  { id: 'shell', name: 'Ракушка', obj: true, cur: 22, note: 'Ракушка. Касание кладёт и убирает', icon: '<path d="M12 19.5c-5.6 0-8.6-4.6-7.3-9C5.8 6.9 8.6 4.8 12 4.8s6.2 2.1 7.3 5.7c1.3 4.4-1.7 9-7.3 9z"/><path d="M12 19.5V4.8M12 19.5L7.4 6.2M12 19.5l4.6-13.3M12 19.5L4.6 11.6M12 19.5l7.4-7.9"/>' },
+  { id: 'star', name: 'Морская звезда', obj: true, cur: 22, note: 'Звезда. Касание кладёт и убирает', icon: '<path d="' + starPath + '"/>' }
+];
+const svg = (inner) => '<svg viewBox="0 0 24 24" aria-hidden="true">' + inner + '</svg>';
+const toolBtn = $('#toolbtn'), menu = $('#menu'), cur = $('#cur');
+let tool = TOOLS[0];
+function setMenu(open) {
+  menu.hidden = !open;
+  toolBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function setTool(id, quiet) {
+  tool = TOOLS.find((t) => t.id === id) || TOOLS[0];
+  toolBtn.innerHTML = svg(TOOLS[2].icon);
+  toolBtn.setAttribute('aria-label', 'Инструмент: ' + tool.name);
+  toolBtn.title = 'Инструменты';
+  menu.querySelectorAll('.mi').forEach((b) => b.setAttribute('aria-checked', b.dataset.tool === tool.id ? 'true' : 'false'));
+  cur.style.setProperty('--cs', Math.round(tool.cur*(tool.cur > 30 ? sizeK() : 1)) + 'px');
+  setMenu(false);
+  if (!quiet) flash(tool.note || tool.name, tool.note ? 3200 : 1600);
+}
+TOOLS.forEach((t, i) => {
+  if (i === 4) { const s = document.createElement('div'); s.className = 'sep'; s.setAttribute('role', 'separator'); menu.appendChild(s); }
+  const b = document.createElement('button');
+  b.className = 'mi'; b.type = 'button'; b.id = 'tool-' + t.id; b.dataset.tool = t.id;
+  b.setAttribute('role', 'menuitemradio');
+  b.innerHTML = svg(t.icon) + '<span>' + t.name + '</span>';
+  b.addEventListener('click', () => setTool(t.id, false));
+  menu.appendChild(b);
+});
+toolBtn.addEventListener('click', () => setMenu(menu.hidden));
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape') setMenu(false); });
+
+/* ───────────── ввод ───────────── */
+const ptr = { x: 0, y: 0 }, ptrS = { x: 0, y: 0 };
+let touched = false;
+
+function firstTouch() {
+  if (touched) return;
+  touched = true; intro = null;
+  setTimeout(() => hint.classList.remove('show'), 2600);
+}
+function onDown(e) {
+  if (e.pointerType === 'mouse' && e.button !== 0 && e.button !== 2) return;
+  if (strokes.has(e.pointerId) || (grab && grab.id === e.pointerId)) return;
+  e.preventDefault();
+  if (!menu.hidden) { setMenu(false); return; }
+  firstTouch(); audioStart();
+  try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
+  const x = e.clientX, y = e.clientY;
+  ptr.x = x/W - 0.5; ptr.y = y/H - 0.5;
+  const second = e.pointerType === 'touch' && strokes.size >= 1;
+  if (!second && !grab && e.button !== 2) {
+    // предмет под пальцем всегда можно взять и передвинуть, каким бы ни был инструмент
+    const o = objHit(x, y);
+    if (o) {
+      objs.splice(objs.indexOf(o), 1); objs.push(o);
+      grab = { id: e.pointerId, o, dx: x - o.x, dy: y - o.y, x0: x, y0: y, moved: false };
+      o.goal = 1.07; objMark(o);
+      document.body.classList.add('drawing'); cur.classList.add('down');
+      return;
+    }
+    if (tool.obj) { objPlace(tool.id, x, y); return; }
+  }
+  if (grab) return;
+  let mode = tool.obj ? 0 : tool.mode;
+  const contact = Math.max(e.width || 0, e.height || 0);
+  if (e.pointerType === 'touch') {
+    if (second) { smoothGesture = true; strokes.forEach(toSmooth); }
+    else if (contact > 100 && contactSane) smoothGesture = true;   // ладонь или ребро ладони
+    if (contact > 0 && contact < 70) contactSane = true;
+    if (smoothGesture) mode = 1;
+  } else if (e.button === 2) mode = 1;
+  addStroke(e.pointerId, x, y, mode, e.pointerType, e.pointerType === 'touch' ? contact : 0, e.timeStamp);
+  cur.classList.add('down');
+}
+function onMove(e) {
+  const x = e.clientX, y = e.clientY;
+  if (e.pointerType === 'mouse') {
+    cur.style.transform = 'translate3d(' + x + 'px,' + y + 'px,0)';
+    cur.classList.toggle('on', e.target === canvas || strokes.has(e.pointerId) || !!grab);
+  }
+  ptr.x = x/W - 0.5; ptr.y = y/H - 0.5;
+  if (grab && grab.id === e.pointerId) {
+    const o = grab.o;
+    if (!grab.moved && Math.hypot(x - grab.x0, y - grab.y0) > 4) grab.moved = true;
+    if (grab.moved) { objMark(o); o.x = x - grab.dx; o.y = y - grab.dy; objMark(o); }
+    return;
+  }
+  const st = strokes.get(e.pointerId);
+  if (!st) return;
+  const list = e.getCoalescedEvents ? e.getCoalescedEvents() : null;
+  if (list && list.length) for (let i = 0; i < list.length; i++) sample(st, list[i].clientX, list[i].clientY, list[i].timeStamp || e.timeStamp);
+  else sample(st, x, y, e.timeStamp);
+}
+function onUp(e) {
+  if (grab && grab.id === e.pointerId) {
+    const o = grab.o, edge = o.x < 6 || o.y < 6 || o.x > W - 6 || o.y > H - 6;
+    // касание без движения своим инструментом убирает предмет; унести за край тоже можно
+    if ((!grab.moved && tool.obj) || edge) o.goal = 0;
+    else { o.goal = 1; if (grab.moved) objPress(o); }
+    objMark(o); thump();
+    grab = null;
+    if (!strokes.size) document.body.classList.remove('drawing');
+  }
+  const st = strokes.get(e.pointerId);
+  if (st) {
+    if (e.type !== 'pointercancel') sample(st, e.clientX, e.clientY, e.timeStamp);
+    finish(st); dropStroke(e.pointerId);
+  }
+  cur.classList.remove('down');
+}
+canvas.addEventListener('pointerdown', onDown);
+window.addEventListener('pointermove', onMove);
+window.addEventListener('pointerup', onUp);
+window.addEventListener('pointercancel', onUp);
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+document.documentElement.addEventListener('mouseleave', () => cur.classList.remove('on'));
+['touchstart', 'touchmove', 'gesturestart', 'dblclick'].forEach((n) => document.addEventListener(n, (e) => { if (e.target === canvas) e.preventDefault(); }, { passive: false }));
+
+/* ───────────── наклон ───────────── */
+const gyro = { x: 0, y: 0, sx: 0, sy: 0, rx: 0, ry: 0, has: false, init: false };
+let motionTries = 0;
+function onOrient(e) {
+  if (e.beta == null || e.gamma == null) return;
+  let x = e.gamma, y = e.beta;
+  const a = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+  if (a === 90) { const t = x; x = y; y = -t; } else if (a === 270 || a === -90) { const t = x; x = -y; y = t; } else if (a === 180) { x = -x; y = -y; }
+  gyro.x = x/24; gyro.y = y/24; gyro.has = true;
+}
+function askMotion() {
+  const D = window.DeviceOrientationEvent;
+  if (!D || typeof D.requestPermission !== 'function' || motionTries < 0 || motionTries > 2) return;
+  motionTries++;
+  try {
+    D.requestPermission().then((s) => { motionTries = -1; if (s === 'granted') window.addEventListener('deviceorientation', onOrient); }).catch(() => {});
+  } catch (e) {}
+}
+if (window.DeviceOrientationEvent && typeof window.DeviceOrientationEvent.requestPermission !== 'function') window.addEventListener('deviceorientation', onOrient);
+['touchend', 'click'].forEach((n) => window.addEventListener(n, askMotion, true));
+
+function tiltNow(dt, now) {
+  const k = 1 - Math.exp(-dt/0.14);
+  ptrS.x += (ptr.x - ptrS.x)*k; ptrS.y += (ptr.y - ptrS.y)*k;
+  let tx = ptrS.x, ty = ptrS.y, gain = 1.9;
+  if (gyro.has) {
+    if (!gyro.init) { gyro.init = true; gyro.sx = gyro.rx = gyro.x; gyro.sy = gyro.ry = gyro.y; }
+    const ks = 1 - Math.exp(-dt/0.07), kr = 1 - Math.exp(-dt/7);
+    gyro.sx += (gyro.x - gyro.sx)*ks; gyro.sy += (gyro.y - gyro.sy)*ks;
+    gyro.rx += (gyro.sx - gyro.rx)*kr; gyro.ry += (gyro.sy - gyro.ry)*kr;
+    gain = 0.6;
+    tx = tx*gain + clamp(gyro.sx - gyro.rx, -3, 3); ty = ty*gain + clamp(gyro.sy - gyro.ry, -3, 3);
+    gain = 1;
+  }
+  const drift = reduceMotion ? 0 : 0.11;
+  return [tx*gain + drift*Math.sin(now*0.00025), ty*gain + drift*Math.cos(now*0.00019)];
+}
+
+/* ───────────── звук ───────────── */
+const audio = { on: store.get('sand.sound') !== '0', ctx: null, n: null, lvl: 0 };
+const soundBtn = $('#sound');
+function buildAudio() {
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if (!AC) return;
+  const ctx = new AC(); audio.ctx = ctx;
+  const len = Math.floor(ctx.sampleRate*2.5), buf = ctx.createBuffer(1, len, ctx.sampleRate), data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = Math.random()*2 - 1;
+  const src = (rate) => { const s = ctx.createBufferSource(); s.buffer = buf; s.loop = true; s.playbackRate.value = rate; s.start(); return s; };
+  const filt = (type, f, q) => { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; return b; };
+  const gain = (v) => { const g = ctx.createGain(); g.gain.value = v; return g; };
+  const master = gain(audio.on ? 1 : 0); master.connect(ctx.destination);
+  // шорох: шум в полосе 2–5 кГц, громкость дрожит случайно, как пересыпающиеся песчинки
+  const hp = filt('highpass', 700, 0.3), bp = filt('bandpass', 2600, 0.55), trem = gain(0.62), g = gain(0);
+  src(1).connect(hp); hp.connect(bp); bp.connect(trem); trem.connect(g); g.connect(master);
+  const lp = filt('lowpass', 38, 0.5), dep = gain(7);
+  src(0.731).connect(lp); lp.connect(dep); dep.connect(trem.gain);
+  // волна: низкий накат и шипение пены
+  const wl = filt('lowpass', 400, 0.4), wg = gain(0); src(0.9).connect(wl); wl.connect(wg); wg.connect(master);
+  const fz = filt('bandpass', 5200, 0.7), fg = gain(0); src(1.21).connect(fz); fz.connect(fg); fg.connect(master);
+  audio.n = { master, g, bp, wl, wg, fg }; audio.buf = buf;
+}
+function audioStart() {
+  if (!audio.on) return;
+  try {
+    if (!audio.ctx) buildAudio();
+    if (audio.ctx && audio.ctx.state !== 'running') audio.ctx.resume().catch(() => {});
+  } catch (e) {}
+}
+function audioFrame(dSpeed, sSpeed) {
+  if (!audio.ctx || !audio.n || audio.ctx.state !== 'running') return;
+  const a = sstep(6, 1100, dSpeed), b = sstep(6, 1100, sSpeed), t = audio.ctx.currentTime;
+  const lvl = Math.max(Math.sqrt(a)*0.16, Math.sqrt(b)*0.20);
+  audio.n.g.gain.setTargetAtTime(lvl, t, lvl > audio.lvl ? 0.03 : 0.10);
+  if (lvl > 0.001) audio.n.bp.frequency.setTargetAtTime(b > a ? 1300 + 900*b : 2100 + 2500*a, t, 0.08);
+  audio.lvl = lvl;
+}
+function waveSound() {
+  if (!audio.ctx || !audio.n || audio.ctx.state !== 'running') return;
+  const n = audio.n, t = audio.ctx.currentTime;
+  n.wg.gain.cancelScheduledValues(t); n.wg.gain.setValueAtTime(0.0001, t);
+  n.wg.gain.linearRampToValueAtTime(0.20, t + 1.7); n.wg.gain.linearRampToValueAtTime(0.07, t + 3.2); n.wg.gain.linearRampToValueAtTime(0.0001, t + 6.6);
+  n.wl.frequency.cancelScheduledValues(t); n.wl.frequency.setValueAtTime(350, t);
+  n.wl.frequency.exponentialRampToValueAtTime(2600, t + 1.8); n.wl.frequency.exponentialRampToValueAtTime(480, t + 6.4);
+  n.fg.gain.cancelScheduledValues(t); n.fg.gain.setValueAtTime(0.0001, t);
+  n.fg.gain.linearRampToValueAtTime(0.035, t + 2.0); n.fg.gain.linearRampToValueAtTime(0.018, t + 4.2); n.fg.gain.linearRampToValueAtTime(0.0001, t + 7.4);
+}
+function thump() {
+  if (!audio.ctx || !audio.n || audio.ctx.state !== 'running') return;
+  const ctx = audio.ctx, t = ctx.currentTime, s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+  s.buffer = audio.buf; f.type = 'lowpass'; f.frequency.value = 240;
+  g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
+  s.connect(f); f.connect(g); g.connect(audio.n.master); s.start(t, Math.random()*2, 0.16);
+}
+function setSound(on) {
+  audio.on = on; store.set('sand.sound', on ? '1' : '0');
+  soundBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  soundBtn.setAttribute('aria-label', on ? 'Звук включён. Выключить' : 'Звук выключен. Включить');
+  if (on) audioStart();
+  if (audio.n) audio.n.master.gain.setTargetAtTime(on ? 1 : 0, audio.ctx.currentTime, 0.05);
+}
+soundBtn.addEventListener('click', () => setSound(!audio.on));
+['pointerup', 'touchend', 'click', 'keydown'].forEach((n) => window.addEventListener(n, () => { if (touched) audioStart(); }, true));
+
+/* ───────────── цвета ───────────── */
+const hint = $('#hint'), label = $('#label'), swBox = $('#swatches');
+let palIndex = clamp(parseInt(FLAGS.get('pal') || store.get('sand.pal') || '0', 10) || 0, 0, PALETTES.length - 1);
+let palNow = palVec(PALETTES[palIndex]), palFrom = palNow, palTo = palNow, palT = 1, labelTimer = 0;
+function skin(p) {
+  const r = document.documentElement.style, ink = p.dark ? '244, 230, 212' : '74, 44, 40';
+  r.setProperty('--ink', 'rgba(' + ink + ', .82)'); r.setProperty('--ink-soft', 'rgba(' + ink + ', .34)');
+  r.setProperty('--halo', p.dark ? 'rgba(10, 8, 8, .6)' : 'rgba(255, 244, 236, .55)');
+  r.setProperty('--glass', p.dark ? 'rgba(255, 255, 255, .08)' : 'rgba(255, 250, 246, .16)');
+  r.setProperty('--glass-on', p.dark ? 'rgba(255, 240, 220, .30)' : 'rgba(255, 252, 248, .62)');
+  r.setProperty('--glass-edge', p.dark ? 'rgba(255, 255, 255, .15)' : 'rgba(255, 255, 255, .30)');
+  r.setProperty('--sand', p.bg);
+  r.setProperty('--panel', p.dark ? 'rgba(46, 42, 40, .88)' : 'rgba(255, 249, 244, .86)');
+  r.setProperty('--ring', p.dark ? 'rgba(255, 244, 228, .96)' : 'rgba(58, 32, 28, .92)');
+  r.setProperty('--ring-halo', p.dark ? 'rgba(0, 0, 0, .5)' : 'rgba(255, 255, 255, .78)');
+  const meta = document.querySelector('meta[name="theme-color"]'); if (meta) meta.setAttribute('content', p.bg);
+}
+function flash(text, ms) {
+  label.textContent = text; label.classList.add('show');
+  clearTimeout(labelTimer); labelTimer = setTimeout(() => label.classList.remove('show'), ms);
+}
+function setPalette(i, quiet) {
+  palIndex = i; store.set('sand.pal', String(i));
+  palFrom = palNow.slice(); palTo = palVec(PALETTES[i]); palT = quiet ? 1 : 0;
+  if (quiet) palNow = palTo;
+  skin(PALETTES[i]);
+  swBox.querySelectorAll('.sw').forEach((b, k) => { b.setAttribute('aria-checked', k === i ? 'true' : 'false'); b.tabIndex = k === i ? 0 : -1; });
+  if (!quiet) {
+    flash(PALETTES[i].name, 2000);
+  }
+  needShow = true;
+}
+PALETTES.forEach((p, i) => {
+  const b = document.createElement('button');
+  b.className = 'sw'; b.type = 'button'; b.id = 'sw' + i;
+  b.setAttribute('role', 'radio'); b.setAttribute('aria-label', p.name); b.title = p.name;
+  b.style.setProperty('--g', p.sw);
+  b.addEventListener('click', () => { if (i !== palIndex) setPalette(i, false); });
+  b.addEventListener('keydown', (e) => {
+    const d = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (!d) return;
+    const k = (palIndex + d + PALETTES.length) % PALETTES.length;
+    setPalette(k, false); swBox.children[k].focus();
+  });
+  swBox.appendChild(b);
+});
+
+/* ───────────── волна ───────────── */
+const WAVE_LEN = 6.0, waveBtn = $('#wave');
+let waveStart = -1, envUntil = 0, envAcc = 0, dryAcc = 0, wavePeak = false;
+function startWave() {
+  if (waveStart >= 0) return;
+  firstTouch(); audioStart();
+  waveStart = clock(); envUntil = waveStart + (WAVE_LEN + 14)*1000; wavePeak = false;
+  waveBtn.disabled = true; waveSound();
+  if (vibOk()) { try { navigator.vibrate([0, 600, 12, 500, 8]); } catch (e) {} }
+}
+waveBtn.addEventListener('click', startWave);
+
+/* ───────────── первый штрих: спираль, чтобы рельеф был виден сразу ───────────── */
+let intro = null;
+function introPoint(u) {
+  const R = Math.min(Math.min(W, H)*0.27, 170), a = -2.2 + Math.PI*2*1.62*Math.pow(u, 0.86), r = R*(0.08 + 0.92*Math.pow(u, 0.95));
+  return [W*0.5 + Math.cos(a)*r, H*0.46 + Math.sin(a)*r];
+}
+function introStep(now) {
+  const e = clamp((now - intro.t0)/intro.dur, 0, 1);
+  if (e <= 0) return;
+  const target = e*e*(3 - 2*e), k = sizeK();
+  while (intro.u < target) {
+    const u = Math.min(target, intro.u + 0.004), p = introPoint(u);
+    const r = k*(15.5 - 6.5*u)*(0.45 + 0.55*(1 - sstep(0.82, 1, u)));
+    if (intro.last) queue.push({ ax: intro.last[0], ay: intro.last[1], bx: p[0], by: p[1], ra: intro.r, rb: r, mode: 0, start: 0 });
+    else queue.push({ ax: p[0], ay: p[1], bx: p[0], by: p[1], ra: r, rb: r, mode: 0, start: 1 });
+    intro.last = p; intro.r = r; intro.u = u;
+    if (u >= 1) break;
+  }
+  if (e >= 1) { intro = null; showHint(); }
+}
+function showHint() {
+  if (touched) return;
+  hint.textContent = coarse ? 'Рисуйте пальцем. Разглаживайте двумя' : 'Рисуйте, зажав кнопку мыши. Инструменты справа внизу';
+  hint.classList.add('show');
+  setTimeout(() => hint.classList.remove('show'), 9000);
+}
+
+/* ───────────── кадр ───────────── */
+let last = 0, shownTilt = [9, 9], slow = 0, steady = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  if (!MANUAL) step(now);
+}
+function step(now) {
+  if (lost || document.hidden || !sim) { last = now; return; }
+  let dt = (now - last)/1000; last = now;
+  const hiccup = dt > 0.1;
+  dt = dt > 0 ? Math.min(dt, 0.25) : 1/60;
+
+  if (intro) introStep(now);
+  strokes.forEach((st) => { if (!st.started && clock() - st.born > 70) begin(st); });
+
+  let n = 0;
+  while (queue.length && n < 64) { stamp(queue.shift()); n++; }
+  audioFrame(drawDist/dt, smoothDist/dt); drawDist = 0; smoothDist = 0;
+
+  let waveT = -1;
+  if (waveStart >= 0) {
+    waveT = (now - waveStart)/1000;
+    if (waveT >= WAVE_LEN) { waveStart = -1; waveT = -1; waveBtn.disabled = false; }
+    // в момент полного накрытия всё под водой окончательно ровное; то, что нарисуют после ухода воды, остаётся
+    else if (!wavePeak && waveT >= 2.25) { wavePeak = true; envPass(0, 0, waveT, true); needShow = true; }
+  }
+  if (now < envUntil) {
+    envAcc += dt; dryAcc += dt;
+    if (envAcc >= (waveT >= 0 ? 1/34 : (packed ? 0.12 : 0.05))) {
+      const dry = (!packed || dryAcc >= 0.12) ? dryAcc : 0;
+      envPass(envAcc, dry, waveT, false);
+      envAcc = 0; if (dry) dryAcc = 0;
+      needShow = true;
+    }
+    if (waveT >= 0) needShow = true;
+  }
+  objStep(dt);
+  if (objDirty) { objPass(objDirty); dirty = unite(dirty, objDirty); objDirty = null; }
+  if (dirty) { objPack(); shadePass(dirty); dirty = null; needShow = true; }
+
+  if (palT < 1) {
+    palT = Math.min(1, palT + dt/0.9);
+    const e = palT*palT*(3 - 2*palT);
+    palNow = palFrom.map((v, i) => v + (palTo[i] - v)*e);
+    needShow = true;
+  }
+  const tilt = tiltNow(dt, now);
+  if (!needShow && Math.hypot(tilt[0] - shownTilt[0], tilt[1] - shownTilt[1]) < 0.004) { steady = 0; return; }
+  showPass(now/1000, waveT, tilt, palNow);
+  shownTilt = tilt; needShow = false;
+
+  // держим 60 кадров: если подряд идут медленные кадры, снижаем разрешение картинки (не рельефа)
+  if (!FLAGS.has('fixed')) {
+    steady++;
+    if (steady > 3 && !hiccup) slow = dt > 0.024 ? slow + 1 : Math.max(0, slow - 1);
+    if (slow > 20 && quality > 0.56) { quality *= 0.84; slow = 0; layout(); }
+  }
+}
+
+/* ───────────── запуск ───────────── */
+function boot() {
+  let ok = false;
+  try { ok = initGL(); } catch (e) { ok = false; if (window.console) console.error(e); }
+  if (!ok) { $('#fail').hidden = false; $('#dock').hidden = true; return; }
+  S = clamp(1400/Math.max(screen.width || 0, screen.height || 0, window.innerWidth, window.innerHeight), 0.5, 1.25);
+  if (!coarse) document.body.classList.add('cur');
+  setPalette(palIndex, true); setSound(audio.on); setTool('finger', true);
+  layout();
+  if (!reduceMotion && !FLAGS.has('nointro')) intro = { t0: clock() + 450, dur: 2400, u: 0, last: null, r: 0 };
+  else setTimeout(showHint, 600);
+  window.addEventListener('resize', layout);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', layout);
+  document.addEventListener('visibilitychange', () => { needShow = true; });
+  canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
+  canvas.addEventListener('webglcontextrestored', () => { try { if (initGL()) { lost = false; layout(); } } catch (e) {} });
+  window.__sand = { wave: startWave, palette: setPalette, tool: setTool, place: objPlace, tick: (ms) => { vnow += ms; step(vnow); }, queue: () => queue.length, info: () => ({ gl2: isGL2, packed, S, quality, sim: sim && [sim.w, sim.h], canvas: [canvas.width, canvas.height] }) };
+  requestAnimationFrame(frame);
+}
+boot();
+})();
+</script>
+</body>
+</html>
