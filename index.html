@@ -607,7 +607,8 @@ void main(){
     gh *= min(1.0, 2.4/max(length(gh), 1e-4));
     vec3 No = normalize(vec3(-gh, 1.0));
     vec3 oa = objColor(B.x, ql, R, B.y, min(e0.z, 1.0))*mix(1.0, 0.72, damp);
-    float ovis = mix(1.0, vis, 0.55);
+    // свет на предмете считается только по его форме: тени борозд под ним не просвечивают
+    const float ovis = 1.0;
     vec3 osun = mix(uSun, vec3(dot(uSun, vec3(0.3333))), B.x < 1.5 ? 0.75 : 0.35);
     vec3 osky = mix(uSky, vec3(dot(uSky, vec3(0.3333))), B.x < 1.5 ? 0.8 : 0.3);
     vec3 ol = osun*(max(dot(No, L), 0.0)*ovis*(0.68/SIN_EL)) + osky*(0.25*(0.6 + 0.4*No.z)) + uAlb*osky*(0.08*(1.0 - No.z));
