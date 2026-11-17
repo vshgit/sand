@@ -890,13 +890,57 @@ function objPress(o) {
   const ra = o.size*(o.type === 1 ? 0.78 : 0.6), dep = o.type === 1 ? 1.3 + o.size*0.035 : 0.8;
   queue.push({ ax: o.x, ay: o.y, bx: o.x, by: o.y, ra, rb: ra, mode: 2, start: 1, k: [dep/ra, 5, 0.2/ra] });
 }
+// предметы не ложатся друг на друга: у каждого свой круг, в который другие не заходят
+const objRad = (o) => o.size*(o.type === 1 ? 0.98 : o.type === 2 ? 1.0 : 0.92);
+const objSolid = (p, o) => p !== o && !p.fly && p.goal > 0;
+function objFree(o, x, y) {
+  for (const p of objs) if (objSolid(p, o) && Math.hypot(x - p.x, y - p.y) < objRad(o) + objRad(p) + 1) return false;
+  return true;
+}
+// ближайшее свободное место: сначала выталкиваем из соседей (предмет скользит вдоль них), если тесно — ищем по кругу
+function objResolve(o, x, y, px, py) {
+  let hit = null;
+  for (let it = 0; it < 10; it++) {
+    let moved = false;
+    for (const p of objs) {
+      if (!objSolid(p, o)) continue;
+      const need = objRad(o) + objRad(p) + 1.5;
+      let dx = x - p.x, dy = y - p.y, d = Math.hypot(dx, dy);
+      if (d >= need) continue;
+      if (px !== undefined) {
+        // при перетаскивании предмет остаётся со своей стороны соседа и скользит по его краю, а не проскакивает насквозь
+        let sx = px - p.x, sy = py - p.y, sd = Math.hypot(sx, sy);
+        if (sd > 0.01) {
+          sx /= sd; sy /= sd;
+          const along = dx*sx + dy*sy, tx = -sy, ty = sx, side = dx*tx + dy*ty;
+          if (along < 0 || sd < need*0.9) { const fw = Math.max(along, 0) + need*0.8; dx = sx*fw + tx*side; dy = sy*fw + ty*side; d = Math.hypot(dx, dy); if (d < 0.01) { dx = sx; dy = sy; d = 1; } }
+        }
+      }
+      if (d < 0.01) { const a = Math.random()*6.283; dx = Math.cos(a); dy = Math.sin(a); d = 1; }
+      x = p.x + dx/d*need; y = p.y + dy/d*need; moved = true; hit = hit || p;
+    }
+    if (!moved) return { x, y, hit };
+  }
+  if (objFree(o, x, y)) return { x, y, hit };
+  const step = objRad(o)*0.5;
+  for (let ring = 1; ring < 40; ring++) {
+    const n = 8 + ring*4;
+    for (let i = 0; i < n; i++) {
+      const a = i/n*6.283 + ring, cx = x + Math.cos(a)*ring*step, cy = y + Math.sin(a)*ring*step;
+      if (objFree(o, cx, cy)) return { x: cx, y: cy, hit: hit || true };
+    }
+  }
+  return { x, y, hit };
+}
 function objPlace(kind, x, y) {
   const k = sizeK(), type = TYPE[kind];
   if (objs.length >= NOBJ) { objMark(objs[0]); objs.shift(); }
   const o = { type, x, y, seed: Math.random()*0.98 + 0.01, scale: 0, goal: 1,
     size: (type === 1 ? 15 + Math.random()*13 : type === 2 ? 16 : 21)*k,
     rot: type === 2 ? (Math.random() - 0.5)*1.5 : Math.random()*6.283 };
-  objs.push(o); objPress(o); objMark(o); thump();
+  const r = objResolve(o, x, y); o.x = r.x; o.y = r.y;
+  objs.push(o); objPress(o); objMark(o);
+  if (r.hit) clack(r.hit.type ? r.hit : o, 0.8); else thump();
   return o;
 }
 function objStep(dt) {
@@ -1021,7 +1065,14 @@ function onMove(e) {
       grab.vx += ((x - grab.lx)/dtm - grab.vx)*k; grab.vy += ((y - grab.ly)/dtm - grab.vy)*k;
       grab.lx = x; grab.ly = y; grab.lt = e.timeStamp;
     }
-    if (grab.moved) { objMark(o); o.x = x - grab.dx; o.y = y - grab.dy; objMark(o); }
+    if (grab.moved) {
+      objMark(o);
+      const r = objResolve(o, x - grab.dx, y - grab.dy, o.x, o.y);
+      o.x = r.x; o.y = r.y;
+      if (r.hit && !grab.touch) clack(r.hit.type ? r.hit : o, clamp(Math.hypot(grab.vx, grab.vy)*0.9, 0.25, 1));
+      grab.touch = !!r.hit;
+      objMark(o);
+    }
     return;
   }
   const st = strokes.get(e.pointerId);
@@ -1154,6 +1205,28 @@ function thump() {
   s.buffer = audio.buf; f.type = 'lowpass'; f.frequency.value = 240;
   g.gain.setValueAtTime(0.55, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.13);
   s.connect(f); f.connect(g); g.connect(audio.n.master); s.start(t, Math.random()*2, 0.16);
+}
+let lastClack = 0;
+function clack(other, power) {
+  if (!audio.ctx || !audio.n || audio.ctx.state !== 'running') return;
+  const ctx = audio.ctx, t = ctx.currentTime;
+  if (t - lastClack < 0.07) return;
+  lastClack = t;
+  const hard = other.type === 1, base = hard ? 2300 + Math.random()*700 : 3400 + Math.random()*900;
+  const hit = (dt, amp) => {
+    // короткий щелчок шума + быстро гаснущий звон
+    const s = ctx.createBufferSource(), f = ctx.createBiquadFilter(), g = ctx.createGain();
+    s.buffer = audio.buf; f.type = 'bandpass'; f.frequency.value = base; f.Q.value = 2.2;
+    g.gain.setValueAtTime(0.0001, t + dt); g.gain.exponentialRampToValueAtTime(0.5*amp, t + dt + 0.002); g.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.035);
+    s.connect(f); f.connect(g); g.connect(audio.n.master); s.start(t + dt, Math.random()*2, 0.05);
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'sine'; o.frequency.value = base*0.62;
+    og.gain.setValueAtTime(0.0001, t + dt); og.gain.exponentialRampToValueAtTime(0.06*amp, t + dt + 0.002); og.gain.exponentialRampToValueAtTime(0.0001, t + dt + (hard ? 0.09 : 0.05));
+    o.connect(og); og.connect(audio.n.master); o.start(t + dt); o.stop(t + dt + 0.12);
+  };
+  hit(0, power);
+  if (power > 0.5) hit(0.045 + Math.random()*0.02, power*0.35);   // лёгкий отскок
+  if (vibOk()) { try { navigator.vibrate(8); } catch (e) {} }
 }
 function setSound(on) {
   audio.on = on; store.set('sand.sound', on ? '1' : '0');
@@ -1326,7 +1399,7 @@ function boot() {
   document.addEventListener('visibilitychange', () => { needShow = true; });
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
   canvas.addEventListener('webglcontextrestored', () => { try { if (initGL()) { lost = false; layout(); } } catch (e) {} });
-  window.__sand = { wave: startWave, palette: setPalette, tool: setTool, place: objPlace, tick: (ms) => { vnow += ms; step(vnow); }, queue: () => queue.length, objs: () => objs.map((o) => o.type).join(","), info: () => ({ gl2: isGL2, packed, S, quality, sim: sim && [sim.w, sim.h], canvas: [canvas.width, canvas.height] }) };
+  window.__sand = { wave: startWave, palette: setPalette, tool: setTool, place: objPlace, tick: (ms) => { vnow += ms; step(vnow); }, queue: () => queue.length, objs: () => objs.map((o) => o.type).join(","), pos: () => objs.map((o) => o.type + "@" + Math.round(o.x) + "," + Math.round(o.y)).join(" "), info: () => ({ gl2: isGL2, packed, S, quality, sim: sim && [sim.w, sim.h], canvas: [canvas.width, canvas.height] }) };
   requestAnimationFrame(frame);
 }
 boot();
