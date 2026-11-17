@@ -881,13 +881,13 @@ function objPack() {
 }
 function objUniforms(u) { gl.uniform4fv(u['uObjA[0]'], objA); gl.uniform4fv(u['uObjB[0]'], objB); gl.uniform1i(u.uObjN, objs.length); }
 function objHit(x, y) {
-  for (let i = objs.length - 1; i >= 0; i--) { const o = objs[i]; if (o.goal > 0 && Math.hypot(x - o.x, y - o.y) < o.size*(o.type === 2 ? 1.12 : 1.0)) return o; }
+  for (let i = objs.length - 1; i >= 0; i--) { const o = objs[i]; if (o.goal > 0 && !o.fly && Math.hypot(x - o.x, y - o.y) < o.size*(o.type === 2 ? 1.12 : 1.0)) return o; }
   return null;
 }
 // предмет слегка вдавливается в песок: след остаётся, когда его уберут
 function objPress(o) {
   const ra = o.size*(o.type === 1 ? 0.78 : 0.6), dep = o.type === 1 ? 1.3 + o.size*0.035 : 0.8;
-  queue.push({ ax: o.x, ay: o.y, bx: o.x, by: o.y, ra, rb: ra, mode: 2, start: 1, k: [dep*0.7/ra, 5, 0.12/ra] });
+  queue.push({ ax: o.x, ay: o.y, bx: o.x, by: o.y, ra, rb: ra, mode: 2, start: 1, k: [dep/ra, 5, 0.2/ra] });
 }
 function objPlace(kind, x, y) {
   const k = sizeK(), type = TYPE[kind];
@@ -901,6 +901,17 @@ function objPlace(kind, x, y) {
 function objStep(dt) {
   for (let i = objs.length - 1; i >= 0; i--) {
     const o = objs[i];
+    if (o.fly) {
+      // летит по инерции, чуть вращаясь и приподнимаясь над песком
+      objMark(o);
+      o.fly.vx *= Math.exp(-dt*0.25); o.fly.vy *= Math.exp(-dt*0.25);
+      o.x += o.fly.vx*dt; o.y += o.fly.vy*dt; o.rot += o.fly.spin*dt;
+      o.scale += (1.15 - o.scale)*(1 - Math.exp(-dt*10));
+      const m = o.size*2;
+      if (o.x < -m || o.y < -m || o.x > W + m || o.y > H + m ) { objs.splice(i, 1); continue; }
+      objMark(o);
+      continue;
+    }
     if (o.scale === o.goal) continue;
     objMark(o);
     o.scale += (o.goal - o.scale)*(1 - Math.exp(-dt*16));
@@ -929,7 +940,7 @@ function setMenu(open) {
 }
 function setTool(id, quiet) {
   tool = TOOLS.find((t) => t.id === id) || TOOLS[0];
-  toolBtn.innerHTML = svg(TOOLS[2].icon);
+  toolBtn.innerHTML = svg(tool.icon);
   toolBtn.setAttribute('aria-label', 'Инструмент: ' + tool.name);
   toolBtn.title = 'Инструменты';
   menu.querySelectorAll('.mi').forEach((b) => b.setAttribute('aria-checked', b.dataset.tool === tool.id ? 'true' : 'false'));
@@ -973,8 +984,9 @@ function onDown(e) {
     const o = objHit(x, y);
     if (o) {
       objs.splice(objs.indexOf(o), 1); objs.push(o);
-      grab = { id: e.pointerId, o, dx: x - o.x, dy: y - o.y, x0: x, y0: y, moved: false };
+      grab = { id: e.pointerId, o, dx: x - o.x, dy: y - o.y, x0: x, y0: y, moved: false, vx: 0, vy: 0, lx: x, ly: y, lt: e.timeStamp };
       o.goal = 1.07; objMark(o);
+      objPress(o);   // под камнем мог пройти песок (волна, пёрышко, грабли): след остаётся там, откуда его подняли
       document.body.classList.add('drawing'); cur.classList.add('down');
       return;
     }
@@ -1002,6 +1014,12 @@ function onMove(e) {
   if (grab && grab.id === e.pointerId) {
     const o = grab.o;
     if (!grab.moved && Math.hypot(x - grab.x0, y - grab.y0) > 4) grab.moved = true;
+    const dtm = e.timeStamp - grab.lt;
+    if (dtm > 0) {
+      const k = 1 - Math.exp(-dtm/45);
+      grab.vx += ((x - grab.lx)/dtm - grab.vx)*k; grab.vy += ((y - grab.ly)/dtm - grab.vy)*k;
+      grab.lx = x; grab.ly = y; grab.lt = e.timeStamp;
+    }
     if (grab.moved) { objMark(o); o.x = x - grab.dx; o.y = y - grab.dy; objMark(o); }
     return;
   }
@@ -1014,10 +1032,17 @@ function onMove(e) {
 function onUp(e) {
   if (grab && grab.id === e.pointerId) {
     const o = grab.o, edge = o.x < 6 || o.y < 6 || o.x > W - 6 || o.y > H - 6;
+    const still = e.timeStamp - grab.lt > 90, sp = still ? 0 : Math.hypot(grab.vx, grab.vy);
+    // быстрый бросок: предмет улетает за край экрана
+    if (grab.moved && sp > 0.75) {
+      const k = Math.max(sp*1000, 1500)/sp;
+      o.fly = { vx: grab.vx*k, vy: grab.vy*k, spin: (Math.random() - 0.5)*7 };
+      o.goal = 1;
+    }
     // касание без движения своим инструментом убирает предмет; унести за край тоже можно
-    if ((!grab.moved && tool.obj) || edge) o.goal = 0;
+    else if ((!grab.moved && tool.obj) || edge) o.goal = 0;
     else { o.goal = 1; if (grab.moved) objPress(o); }
-    objMark(o); thump();
+    objMark(o); if (!o.fly) thump();
     grab = null;
     if (!strokes.size) document.body.classList.remove('drawing');
   }
@@ -1300,7 +1325,7 @@ function boot() {
   document.addEventListener('visibilitychange', () => { needShow = true; });
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
   canvas.addEventListener('webglcontextrestored', () => { try { if (initGL()) { lost = false; layout(); } } catch (e) {} });
-  window.__sand = { wave: startWave, palette: setPalette, tool: setTool, place: objPlace, tick: (ms) => { vnow += ms; step(vnow); }, queue: () => queue.length, info: () => ({ gl2: isGL2, packed, S, quality, sim: sim && [sim.w, sim.h], canvas: [canvas.width, canvas.height] }) };
+  window.__sand = { wave: startWave, palette: setPalette, tool: setTool, place: objPlace, tick: (ms) => { vnow += ms; step(vnow); }, queue: () => queue.length, objs: () => objs.map((o) => o.type).join(","), info: () => ({ gl2: isGL2, packed, S, quality, sim: sim && [sim.w, sim.h], canvas: [canvas.width, canvas.height] }) };
   requestAnimationFrame(frame);
 }
 boot();
